@@ -1,0 +1,16 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Your rule content
+
+!IMPORTANT: Maintain code modularity by breaking files into smaller components when they exceed 500 lines of code or contain distinct functional responsibilities (e.g., API calls, utility functions, hooks/logic).  
+Ensure each component is self-contained, exported properly, and imported where needed. Update the main file (e.g., app_client.py) to orchestrate these components.
+
+!IMPORTANT: At the top of each file, include a concise, informative header comment summarizing the file's purpose and key details. The header must include:
+- A brief description of the file’s functionality or role.
+- A list of exported functions/classes with their parameters (including type annotations), return types, and required arguments. Adopt the type restriction from Typescript strictly.
+- A list of immediately related files (e.g., dependencies or files that directly interact with this one).
+Use a consistent format (e.g., docstring or block comment) and keep it under 10 lines unless complexity demands more. Update the header if the file’s purpose or dependencies change.
