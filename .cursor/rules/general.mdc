@@ -3,14 +3,27 @@ description:
 globs: 
 alwaysApply: true
 ---
-
-# Your rule content
-
-!IMPORTANT: Maintain code modularity by breaking files into smaller components when they exceed 500 lines of code or contain distinct functional responsibilities (e.g., API calls, utility functions, hooks/logic).  
-Ensure each component is self-contained, exported properly, and imported where needed. Update the main file (e.g., app_client.py) to orchestrate these components.
-
-!IMPORTANT: At the top of each file, include a concise, informative header comment summarizing the file's purpose and key details. The header must include:
-- A brief description of the file’s functionality or role.
-- A list of exported functions/classes with their parameters (including type annotations), return types, and required arguments. Adopt the type restriction from Typescript strictly.
-- A list of immediately related files (e.g., dependencies or files that directly interact with this one).
-Use a consistent format (e.g., docstring or block comment) and keep it under 10 lines unless complexity demands more. Update the header if the file’s purpose or dependencies change.
+1. NEVER EDIT [rss.md](mdc:sources/rss.md) . NEVER EVER EDIT ANYTHING IN THE FOLDER sources/
+2. Avoid Over-Engineering
+    Minimize excessive error handlers, placeholders, and fallbacks.
+    Keep solutions simple and avoid unnecessary abstraction.
+3. Enforce Code Modularity
+    Split files when they exceed 500 lines or contain distinct functional responsibilities (e.g., API calls, utilities, logic).
+    Each module must be self-contained, properly exported, and imported where needed.The main file (e.g., app_client.py) should act as an orchestrator, managing imports and dependencies.
+4. Structured File Header (≤10 lines)
+    Each file must begin with a concise, structured header comment containing:
+    Purpose: A brief summary of the file’s functionality.
+    Exports: A list of exported functions/classes with:
+        Name
+        Parameters (strict TypeScript type annotations)
+        Return Type
+        Required Arguments
+    Related Files:
+        Dependencies & Interacting Modules (files below in the hierarchy).
+        Parent Modules (files above in the hierarchy).
+    Format: Use a consistent docstring or block comment.
+    Keep Updated: Modify the header when the file’s role or dependencies change.
+5. Maintain Single Responsibility Principle (SRP). 
+   Each file, function, and class should have one clearly defined responsibility. Avoid overloading functions with multiple, unrelated tasks.
+6. Error Handling Best Practices:
+   Only catch expected errors; avoid excessive try/catch blocks. Log errors meaningfully, including the function name and relevant data.Propagate critical errors instead of suppressing them silently.

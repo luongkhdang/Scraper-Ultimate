@@ -3,7 +3,9 @@ PostgreSQL Database Client: Handles database connections and operations for the 
 
 Exported Functions:
 - setup_database() -> None: Sets up required database tables
-- store_article(article_data: Dict) -> bool: Stores article data in the database
+- store_article_url(article_data: Dict) -> bool: Stores article URL and metadata from RSS
+- update_article_content(article_id: int, content: str, error_message: Optional[str] = None) -> bool: Updates article with scraped content
+- get_pending_articles(limit: int = 100) -> list: Gets articles with 'Pending' status
 - check_url_in_database(url: str) -> bool: Checks if a URL exists in the database
 
 Related Files:
@@ -56,26 +58,36 @@ class PostgreSQLClient:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Drop the articles table if it exists to ensure clean structure
-            cursor.execute("DROP TABLE IF EXISTS articles")
-            logger.info("Dropped existing articles table")
+            # Check if table exists first
+            cursor.execute(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'articles')")
+            table_exists = cursor.fetchone()[0]
 
-            # Create articles table with exactly the specified columns
-            cursor.execute("""
-                CREATE TABLE articles (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    title TEXT,
-                    content TEXT,
-                    authors JSONB,
-                    published_date TIMESTAMP,
-                    scraped_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            if not table_exists:
+                # Create articles table with the schema
+                logger.info("Creating articles table...")
+                cursor.execute("""
+                    CREATE TABLE articles (
+                        id SERIAL PRIMARY KEY,
+                        proceeding_status TEXT NOT NULL DEFAULT 'Pending',
+                        url TEXT UNIQUE NOT NULL,
+                        domain TEXT,
+                        title TEXT,
+                        content TEXT,
+                        pub_date TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        scraped_at TIMESTAMP,
+                        error_message TEXT
+                    )
+                """)
+                conn.commit()
+                logger.info("Created articles table successfully")
+            else:
+                logger.info(
+                    "Articles table already exists, keeping existing data")
 
             conn.commit()
-            logger.info("Database setup completed with clean schema")
+            logger.info("Database setup completed successfully")
 
         except psycopg2.OperationalError as e:
             logger.error(f"Database connection error: {e}")
@@ -93,51 +105,151 @@ class PostgreSQLClient:
             if conn:
                 conn.close()
 
-    def store_article(self, article_data: Dict) -> bool:
-        """Store an article in the database"""
+    def store_article_url(self, article_data: Dict) -> bool:
+        """
+        Store article URL and metadata from RSS feed
+        Sets proceeding_status to 'Pending' for later content scraping
+
+        Args:
+            article_data: Dictionary containing url, domain, title, and pub_date
+
+        Returns:
+            True if successful, False otherwise
+        """
         conn = None
         cursor = None
         try:
-            # Skip articles with content less than 80 characters
-            if not article_data.get('content') or len(article_data['content']) < 80:
-                logger.info(
-                    f"Skipping article with insufficient content: {article_data.get('title', 'Untitled')}")
-                return False
-
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Insert article data - only using the specified columns
+            # Insert article data from RSS feed
             cursor.execute("""
                 INSERT INTO articles (
-                    url, title, content, authors, published_date, scraped_at
+                    url, domain, title, pub_date, proceeding_status, created_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, 'Pending', CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (url) 
                 DO UPDATE SET
+                    domain = EXCLUDED.domain,
                     title = EXCLUDED.title,
-                    content = EXCLUDED.content,
-                    authors = EXCLUDED.authors,
-                    published_date = EXCLUDED.published_date,
-                    scraped_at = EXCLUDED.scraped_at
+                    pub_date = EXCLUDED.pub_date
+                RETURNING id
             """, (
                 article_data['url'],
+                article_data['domain'],
                 article_data['title'],
-                article_data['content'],
-                Json(article_data['authors']
-                     ) if article_data['authors'] else None,
-                article_data['published_date'],
-                article_data['scraped_at']
+                article_data['pub_date']
             ))
 
+            article_id = cursor.fetchone()[0]
             conn.commit()
-            logger.info(f"Stored article: {article_data['title']}")
-            return True
+            logger.info(
+                f"Stored article URL: {article_data['title']} (ID: {article_id})")
+            return article_id
         except Exception as e:
             logger.error(
-                f"Error storing article {article_data.get('url')}: {e}")
+                f"Error storing article URL {article_data.get('url')}: {e}")
+            if conn:
+                conn.rollback()
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def update_article_content(self, article_id: int, content: str, error_message: Optional[str] = None) -> bool:
+        """
+        Update article with scraped content or error message
+
+        Args:
+            article_id: ID of the article to update
+            content: Article content (can be None if scraping failed)
+            error_message: Error message if scraping failed
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            if error_message:
+                # Update with error message and mark as FAILED
+                cursor.execute("""
+                    UPDATE articles
+                    SET proceeding_status = 'FAILED',
+                        error_message = %s,
+                        scraped_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (error_message, article_id))
+                status = "FAILED"
+            else:
+                # Update with content and mark as ReadyForReview
+                cursor.execute("""
+                    UPDATE articles
+                    SET proceeding_status = 'ReadyForReview',
+                        content = %s,
+                        scraped_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (content, article_id))
+                status = "ReadyForReview"
+
+            conn.commit()
+            logger.info(f"Updated article ID {article_id}: Status = {status}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating article {article_id}: {e}")
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def get_pending_articles(self, limit: int = 100) -> list:
+        """
+        Get articles with 'Pending' status for content scraping
+
+        Args:
+            limit: Maximum number of articles to retrieve
+
+        Returns:
+            List of dictionaries containing article data
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, url, domain, title
+                FROM articles
+                WHERE proceeding_status = 'Pending'
+                ORDER BY id ASC
+                LIMIT %s
+            """, (limit,))
+
+            articles = []
+            for row in cursor.fetchall():
+                articles.append({
+                    'id': row[0],
+                    'url': row[1],
+                    'domain': row[2],
+                    'title': row[3]
+                })
+
+            logger.info(f"Retrieved {len(articles)} pending articles")
+            return articles
+        except Exception as e:
+            logger.error(f"Error getting pending articles: {e}")
+            return []
         finally:
             if cursor:
                 cursor.close()
@@ -161,6 +273,59 @@ class PostgreSQLClient:
         except Exception as e:
             logger.error(f"Error checking URL {url} in database: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def get_failed_domains(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get unique domains that had failed article processing along with their error messages
+
+        Returns:
+            Dictionary with domains as keys and a dictionary of error statistics as values
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Query to get unique domains with failed articles, including error messages and counts
+            cursor.execute("""
+                SELECT 
+                    domain,
+                    COUNT(*) as failed_count,
+                    array_agg(DISTINCT error_message) as error_messages,
+                    array_agg(id) as article_ids
+                FROM articles
+                WHERE proceeding_status = 'FAILED'
+                GROUP BY domain
+                ORDER BY failed_count DESC
+            """)
+
+            failed_domains = {}
+            for row in cursor.fetchall():
+                domain = row[0]
+                count = row[1]
+                error_messages = row[2]
+                article_ids = row[3]
+
+                # Create dictionary entry for this domain
+                failed_domains[domain] = {
+                    'failed_count': count,
+                    'error_messages': error_messages,
+                    # Limit to first 10 IDs to avoid huge output
+                    'article_ids': article_ids[:10]
+                }
+
+            logger.info(
+                f"Retrieved {len(failed_domains)} domains with failed articles")
+            return failed_domains
+        except Exception as e:
+            logger.error(f"Error getting failed domains: {e}")
+            return {}
         finally:
             if cursor:
                 cursor.close()

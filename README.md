@@ -1,17 +1,64 @@
-# News Scraper Ultimate
+# News Scraper
 
-A powerful news scraper that extracts articles from various news websites and stores them in a PostgreSQL database.
+A modular scraper for news articles from RSS feeds.
+
+## Workflow
+
+The scraper implements a three-step workflow:
+
+1. **Initial URL Scraping (RSS Feeds)**
+
+   - Extracts article URLs from RSS feeds listed in `sources/rss.md`
+   - Stores them in the database with:
+     - `proceeding_status` = "Pending"
+     - `url`, `domain`, `title`, `pub_date`, `created_at`
+
+2. **Article Content Scraping**
+
+   - Processes URLs with `proceeding_status` = "Pending"
+   - Scrapes article content and updates:
+     - `content`
+     - `scraped_at` (timestamp when scraped)
+     - Changes `proceeding_status` to "ReadyForReview"
+
+3. **Handling Failed Scrapes**
+   - If scraping fails:
+     - Updates `proceeding_status` = "FAILED"
+     - Stores the error details in `error_message`
 
 ## Features
 
-- Extracts article URLs from news website homepages
-- Scrapes full article content using Newspaper3k
-- Extracts metadata like authors, publish date, and keywords
-- Stores articles in a PostgreSQL database
-- Parallel processing for faster scraping
-- Proxy rotation to avoid IP blocking
-- Handles errors gracefully
-- Docker support for easy deployment
+- Focused on RSS feeds for reliable article discovery
+- Modular architecture for maintainable code
+- Parallel processing for efficiency
+- Robust error handling
+- Detailed logging
+
+## Usage
+
+1. Add RSS feed URLs to `sources/rss.md`
+2. Run the scraper:
+   ```
+   python src/main.py
+   ```
+
+## Project Structure
+
+```
+src/
+├── main.py                  # Main entry point
+├── main_hooks/              # Core scraping functionality
+│   ├── content_processor.py # Article content processing
+├── main_utils/              # Utility functions
+│   ├── file_operations.py   # File handling utilities
+│   └── db_utils.py          # Database utilities
+├── scraper/                 # Scraper implementation
+│   ├── scraper_client.py    # Main scraper client
+│   └── scraper_hooks/       # Modular scraping components
+├── postgreSQL/              # Database operations
+sources/
+└── rss.md                   # RSS feed sources
+```
 
 ## Requirements
 
@@ -84,24 +131,6 @@ The application can be configured using environment variables:
 - `MAX_ARTICLES_PER_WEBSITE`: Maximum number of articles to scrape per website (default: 5)
 - `PARALLEL_WORKERS`: Number of parallel workers (default: 3)
 - `USE_PROXIES`: Whether to use proxy rotation (default: true)
-
-## Usage
-
-1. Add website URLs to scrape in `sources/websites.md`, one URL per line.
-
-2. Run the scraper:
-
-With Docker:
-
-```bash
-docker-compose up
-```
-
-Without Docker:
-
-```bash
-python src/main.py
-```
 
 ## Proxy Rotation
 

@@ -1,31 +1,41 @@
 """
 Main Scraper Application: Orchestrates the scraping of news websites and stores content in PostgreSQL database.
 
-Exported Functions:
-- read_websites_from_file(file_path: str) -> List[str]: Reads website URLs from a file
-- process_website(website_url: str, scraper: ScraperClient, db_client: PostgreSQLClient, max_articles: int) -> int: Processes a website
-- main() -> None: Main function that orchestrates the scraping process
+This file acts as the main entry point and orchestrates the scraping workflow:
+1. Extract URLs from RSS feeds (sources/rss.md)
+2. Process pending articles 
+3. Handle failed scrapes
+4. Export domain statistics and failed feeds
 
 Related Files:
-- scraper/scraper_client.py: Provides the ScraperClient class for scraping
+- main_hooks/: Contains the core scraping functionality
+- main_utils/: Contains utility functions
+- scraper/: Provides the ScraperClient class for scraping
 - postgreSQL/postgreSQL_client.py: Handles database operations
 """
-from scraper.scraper_client import ScraperClient
+from main_hooks import process_pending_articles
+from main_utils import read_rss_feeds_from_file, wait_for_database, export_failed_domains, export_failed_feeds
 from postgreSQL.postgreSQL_client import PostgreSQLClient
+from scraper import ScraperClient
 import os
 import sys
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict
+from datetime import datetime
 from dotenv import load_dotenv
-import psycopg2
-
-# Load environment variables from .env file if present
-load_dotenv()
 
 # Add the src directory to the path so we can import the scraper client
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import the scraper and database clients
+
+# Import utility functions
+
+# Import core scraping functionality
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -33,92 +43,94 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Scraper configuration from environment variables
-MAX_ARTICLES_PER_WEBSITE = int(
-    os.environ.get('MAX_ARTICLES_PER_WEBSITE', '10'))
 PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
-DB_RETRY_ATTEMPTS = int(os.environ.get('DB_RETRY_ATTEMPTS', '5'))
-DB_RETRY_DELAY = int(os.environ.get('DB_RETRY_DELAY', '5'))
-
-logger.info(
-    f"Scraper configuration: max_articles={MAX_ARTICLES_PER_WEBSITE}, workers={PARALLEL_WORKERS}")
+PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '100'))
 
 
-def read_websites_from_file(file_path: str) -> List[str]:
-    """Read website URLs from a file"""
+def process_rss_feed(feed_url: str, scraper: ScraperClient, db_client: PostgreSQLClient) -> int:
+    """
+    Process a single RSS feed and store article URLs
+
+    Args:
+        feed_url: URL of the RSS feed to process
+        scraper: ScraperClient instance
+        db_client: PostgreSQLClient instance
+
+    Returns:
+        Number of article URLs stored
+    """
     try:
-        with open(file_path, 'r') as f:
-            # Read lines and strip whitespace
-            urls = [line.strip() for line in f.readlines() if line.strip()
-                    and not line.strip().startswith('#')]
-        logger.info(f"Read {len(urls)} websites from {file_path}")
-        return urls
-    except Exception as e:
-        logger.error(f"Error reading websites from {file_path}: {e}")
-        return []
+        logger.info(f"Processing RSS feed: {feed_url}")
 
+        # Extract feed content, passing db_client to filter out existing URLs
+        # Get only articles from the last 2 days
+        feed_items = scraper.extract_rss_feed_content(
+            feed_url, db_client, days=2)
 
-def wait_for_database(db_client: PostgreSQLClient, max_retries: int = DB_RETRY_ATTEMPTS, delay: int = DB_RETRY_DELAY) -> bool:
-    """Wait for the database to become available"""
-    logger.info(
-        f"Waiting for database to become available (max retries: {max_retries}, delay: {delay}s)...")
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            # Try to get a connection
-            conn = db_client.get_connection()
-            conn.close()
-            logger.info("Database is available")
-            return True
-        except psycopg2.OperationalError as e:
+        if not feed_items:
             logger.warning(
-                f"Database not available yet (attempt {attempt}/{max_retries}): {e}")
-            if attempt < max_retries:
-                logger.info(f"Waiting {delay} seconds before next attempt...")
-                time.sleep(delay)
-            else:
-                logger.error(
-                    "Maximum retry attempts reached. Database is not available.")
-                return False
-        except Exception as e:
-            logger.error(f"Unexpected error while connecting to database: {e}")
-            return False
+                f"No new recent items found in RSS feed: {feed_url}")
+            return 0
 
-    return False
+        # Log number of items found
+        logger.info(
+            f"Found {len(feed_items)} new recent items in RSS feed: {feed_url}")
 
-
-def process_website(website_url: str, scraper: ScraperClient, db_client: PostgreSQLClient, max_articles: int = MAX_ARTICLES_PER_WEBSITE) -> int:
-    """Process a single website, extract and store articles"""
-    try:
-        # Extract article URLs
-        article_urls = scraper.extract_article_urls(
-            website_url, limit=max_articles)
-
-        # Process each article URL
-        success_count = 0
-        for url in article_urls:
-            # Skip if URL already exists in database
-            if db_client.check_url_in_database(url):
-                logger.info(f"Skipping already processed URL: {url}")
+        # Process each item in the feed
+        articles_stored = 0
+        for item in feed_items:
+            # Extract necessary fields
+            url = item.get('link', '')
+            if not url:
                 continue
 
-            # Extract article content
-            article_data = scraper.extract_article_content(url)
+            # Parse domain from URL
+            try:
+                domain = url.split(
+                    '/')[2] if '//' in url else url.split('/')[0]
+            except IndexError:
+                logger.warning(f"Malformed URL: {url}")
+                continue
 
-            # Store article if extraction was successful
-            if article_data and db_client.store_article(article_data):
-                success_count += 1
+            # Get date
+            pub_date = item.get('pubDate', '')
 
-            # Add a small delay to avoid overloading the server
-            time.sleep(1)
+            # Get title with fallback
+            title = item.get('title', '')
+            if not title:
+                title = f"Untitled article from {domain}"
 
-        return success_count
+            # Prepare article data for database
+            article_data = {
+                'url': url,
+                'domain': domain,
+                'title': title,
+                'pub_date': pub_date
+            }
+
+            # Log the article being stored
+            logger.debug(f"Storing article: {title} - {url}")
+
+            # Store article URL in database
+            result = db_client.store_article_url(article_data)
+            if result:
+                articles_stored += 1
+                logger.debug(f"Successfully stored article: {title}")
+            else:
+                logger.warning(f"Failed to store article: {title} - {url}")
+
+        logger.info(
+            f"Stored {articles_stored} articles from RSS feed: {feed_url}")
+        return articles_stored
+
     except Exception as e:
-        logger.error(f"Error processing website {website_url}: {e}")
+        logger.error(
+            f"Error processing RSS feed {feed_url}: {e}", exc_info=True)
         return 0
 
 
 def main():
-    """Main function to extract and store news articles"""
+    """Main function to orchestrate the scraping process"""
     try:
         # Initialize the PostgreSQL client
         db_client = PostgreSQLClient()
@@ -134,39 +146,104 @@ def main():
         # Initialize the scraper client
         scraper = ScraperClient()
 
-        # Read websites from the file
-        websites_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                     'sources', 'websites.md')
-        websites = read_websites_from_file(websites_file)
+        # STEP 1: Read RSS feeds from the file
+        rss_feeds_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                      'sources', 'rss.md')
+        rss_feeds = read_rss_feeds_from_file(rss_feeds_file)
 
-        if not websites:
-            logger.error("No websites found. Exiting.")
+        if not rss_feeds:
+            logger.error("No RSS feeds found. Exiting.")
             return
 
-        logger.info(f"Starting scraping of {len(websites)} websites")
+        logger.info(f"Starting RSS feed scraping for {len(rss_feeds)} feeds")
 
-        # Process websites in parallel using ThreadPoolExecutor
+        # Process RSS feeds in parallel
         total_articles = 0
+        failed_feeds = {}
         with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
-            # Submit all website processing tasks
-            future_to_website = {
-                executor.submit(process_website, website, scraper, db_client): website
-                for website in websites
+            # Submit all RSS feed processing tasks
+            future_to_feed = {
+                executor.submit(process_rss_feed, feed, scraper, db_client): feed
+                for feed in rss_feeds
             }
 
             # Collect results as they complete
-            for future in future_to_website:
-                website = future_to_website[future]
+            for future in future_to_feed:
+                feed = future_to_feed[future]
                 try:
                     articles_count = future.result()
                     total_articles += articles_count
-                    logger.info(
-                        f"Processed {articles_count} articles from {website}")
+
+                    # Track feeds with zero articles as potentially failed
+                    if articles_count == 0:
+                        failed_feeds[feed] = {
+                            "error": "No articles extracted",
+                            "timestamp": str(datetime.now())
+                        }
                 except Exception as e:
-                    logger.error(f"Error processing {website}: {e}")
+                    logger.error(f"Error processing RSS feed {feed}: {e}")
+                    failed_feeds[feed] = {
+                        "error": str(e),
+                        "timestamp": str(datetime.now())
+                    }
 
         logger.info(
-            f"Scraping completed. Total articles processed: {total_articles}")
+            f"RSS feed scraping completed. Total article URLs stored: {total_articles}")
+        logger.info(f"RSS feed scraping failed for {len(failed_feeds)} feeds")
+
+        # STEP 2 & 3: Process pending articles and handle failures
+        total_processed = 0
+        batch_count = 0
+        logger.info("Starting to process pending articles...")
+        while True:
+            batch_count += 1
+            logger.info(
+                f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
+            processed_count = process_pending_articles(
+                scraper, db_client, PENDING_BATCH_SIZE)
+
+            total_processed += processed_count
+            logger.info(
+                f"Batch #{batch_count} complete: processed {processed_count} articles")
+
+            if processed_count == 0:
+                logger.info(
+                    "No more pending articles to process, exiting loop")
+                break
+            else:
+                logger.info(
+                    f"Continuing to next batch, {processed_count} articles processed in this batch")
+
+        logger.info(
+            f"All pending article processing complete. Total articles processed: {total_processed}")
+
+        # Export failed RSS feeds
+        if failed_feeds:
+            failed_feeds_file = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), 'failed_feeds.json')
+            export_failed_feeds(failed_feeds, failed_feeds_file)
+            logger.info(
+                f"Exported {len(failed_feeds)} failed RSS feeds to {failed_feeds_file}")
+        else:
+            logger.info("No failed RSS feeds to export")
+
+        # Export failed domains with error messages
+        failed_domains = db_client.get_failed_domains()
+        if failed_domains:
+            failed_domains_file = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), 'failed_domains.json')
+            export_failed_domains(failed_domains, failed_domains_file)
+            logger.info(
+                f"Exported {len(failed_domains)} failed domains to {failed_domains_file}")
+        else:
+            logger.info("No failed domains to export")
+
+        # Export unique domains encountered during scraping
+        output_file = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'unique_domains.json')
+        scraper.export_unique_domains(output_file)
+        logger.info(f"Unique domains exported to {output_file}")
+
     except Exception as e:
         logger.error(f"Error in main function: {e}")
 
