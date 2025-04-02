@@ -1,3 +1,8 @@
+https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
+https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=economy
+https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=vietnam
+https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=tax
+https://biztoc.com/feed
 https://thehill.com/policy/feed/
 https://thehill.com/business/feed/
 https://thehill.com/opinion/feed/
@@ -84,13 +89,11 @@ https://www.entrepreneur.com/latest.rss
 https://www.investing.com/rss/news.rss
 https://seekingalpha.com/market_currents.xml
 https://seekingalpha.com/tag/market-outlook/feed
-https://economictimes.indiatimes.com/Opinion/Editorial/rssfeeds/3376910.cms
 https://feeds.feedburner.com/hackread
 https://feeds.feedburner.com/CalculatedRisk
 https://www.businesstimes.com.sg/rss/government-economy
 https://www.businesstimes.com.sg/rss/banking-finance
 https://www.nakedcapitalism.com/feed
 https://feeds.feedburner.com/zerohedge/feed
-https://feeds.feedburner.com/TheBigPicture
 https://prod-qt-images.s3.amazonaws.com/production/bloombergquint/feed.xml
 https://feeds.feedburner.com/ndtvprofit-latest

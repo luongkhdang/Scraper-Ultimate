@@ -146,7 +146,34 @@ def main():
         # Initialize the scraper client
         scraper = ScraperClient()
 
-        # STEP 1: Read RSS feeds from the file
+        # STEP 1: Process any pending articles from previous runs
+        logger.info(
+            "Starting to process pending articles before RSS scraping...")
+        total_processed = 0
+        batch_count = 0
+        while True:
+            batch_count += 1
+            logger.info(
+                f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
+            processed_count = process_pending_articles(
+                scraper, db_client, PENDING_BATCH_SIZE)
+
+            total_processed += processed_count
+            logger.info(
+                f"Batch #{batch_count} complete: processed {processed_count} articles")
+
+            if processed_count == 0:
+                logger.info(
+                    "No more pending articles to process, moving to RSS feed scraping")
+                break
+            else:
+                logger.info(
+                    f"Continuing to next batch, {processed_count} articles processed in this batch")
+
+        logger.info(
+            f"Initial pending article processing complete. Total articles processed: {total_processed}")
+
+        # STEP 2: Read RSS feeds from the file
         rss_feeds_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                       'sources', 'rss.md')
         rss_feeds = read_rss_feeds_from_file(rss_feeds_file)
@@ -191,31 +218,37 @@ def main():
             f"RSS feed scraping completed. Total article URLs stored: {total_articles}")
         logger.info(f"RSS feed scraping failed for {len(failed_feeds)} feeds")
 
-        # STEP 2 & 3: Process pending articles and handle failures
-        total_processed = 0
-        batch_count = 0
-        logger.info("Starting to process pending articles...")
-        while True:
-            batch_count += 1
+        # STEP 3: Process any new pending articles that were just added from RSS feeds
+        if total_articles > 0:
             logger.info(
-                f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
-            processed_count = process_pending_articles(
-                scraper, db_client, PENDING_BATCH_SIZE)
+                "Processing newly added pending articles from RSS feeds...")
+            additional_processed = 0
+            new_batch_count = 0
+            while True:
+                new_batch_count += 1
+                logger.info(
+                    f"Processing batch #{new_batch_count} of new pending articles (batch size: {PENDING_BATCH_SIZE})")
+                processed_count = process_pending_articles(
+                    scraper, db_client, PENDING_BATCH_SIZE)
 
-            total_processed += processed_count
+                additional_processed += processed_count
+                logger.info(
+                    f"Batch #{new_batch_count} complete: processed {processed_count} articles")
+
+                if processed_count == 0:
+                    logger.info(
+                        "No more pending articles to process, exiting loop")
+                    break
+                else:
+                    logger.info(
+                        f"Continuing to next batch, {processed_count} articles processed in this batch")
+
             logger.info(
-                f"Batch #{batch_count} complete: processed {processed_count} articles")
-
-            if processed_count == 0:
-                logger.info(
-                    "No more pending articles to process, exiting loop")
-                break
-            else:
-                logger.info(
-                    f"Continuing to next batch, {processed_count} articles processed in this batch")
+                f"Additional pending article processing complete. Total new articles processed: {additional_processed}")
+            total_processed += additional_processed
 
         logger.info(
-            f"All pending article processing complete. Total articles processed: {total_processed}")
+            f"All pending article processing complete. Grand total processed: {total_processed}")
 
         # Export failed RSS feeds
         if failed_feeds:

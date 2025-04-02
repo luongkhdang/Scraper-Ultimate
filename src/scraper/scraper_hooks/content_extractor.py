@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+import re
+import time
 
 # Import local modules
 from .utils import make_request, get_random_user_agent, get_realistic_headers, random_delay, get_referrer
@@ -36,6 +38,108 @@ except ImportError:
 domains_with_old_articles = {}  # domain -> count of old articles
 
 
+def _follow_redirect(url: str) -> str:
+    """Follow URL redirects and return the final destination URL
+
+    This is particularly useful for RSS feed links that redirect to the actual article
+
+    Args:
+        url: The URL that may contain a redirect
+
+    Returns:
+        The final destination URL after following all redirects
+    """
+    try:
+        logger.info(f"Following redirects for {url}")
+
+        # Handle special cases for known redirect patterns
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.lower()
+
+        # BizToc redirects
+        if "biztoc.com" in domain and ("/x/" in url):
+            logger.info("Detected BizToc redirect URL")
+            # For BizToc URLs, we need to make a request and extract the destination from the page
+            headers = get_realistic_headers(url)
+            response = make_request(url, headers=headers)
+
+            if response and response.status_code in (301, 302, 303, 307, 308):
+                redirect_url = response.headers.get('Location')
+                if redirect_url:
+                    logger.info(f"BizToc redirecting to: {redirect_url}")
+                    return redirect_url
+
+            # If no redirect header, try to extract from the HTML
+            if response and response.text:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # BizToc typically has a "Read full article" link
+                read_links = soup.find_all('a', text=re.compile(
+                    r'Read full article|Continue reading|View original', re.IGNORECASE))
+                if read_links and len(read_links) > 0:
+                    for link in read_links:
+                        href = link.get('href')
+                        if href and not href.startswith('http'):
+                            href = f"https://biztoc.com{href}"
+                        if href:
+                            logger.info(
+                                f"Found redirect link in BizToc page: {href}")
+                            return href
+
+        # Google News redirects
+        elif "news.google.com" in domain and "/articles/" in url:
+            logger.info("Detected Google News redirect URL")
+            # Google News needs special handling for redirect extraction
+            headers = get_realistic_headers(url)
+            headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+            response = make_request(url, headers=headers)
+
+            if response and response.status_code in (301, 302, 303, 307, 308):
+                redirect_url = response.headers.get('Location')
+                if redirect_url:
+                    logger.info(f"Google News redirecting to: {redirect_url}")
+                    return redirect_url
+
+            # If no redirect in headers, try to extract from content
+            if response and response.text:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # Google News has a canonical link or redirect URL in the HTML
+                redirect_link = soup.find('a', attrs={'jsname': 'tljFtd'})
+                if redirect_link:
+                    href = redirect_link.get('href')
+                    if href:
+                        if href.startswith('./'):
+                            href = f"https://news.google.com{href[1:]}"
+                        logger.info(
+                            f"Found redirect link in Google News page: {href}")
+                        return href
+
+                # Look for other possible redirect links
+                all_links = soup.find_all('a')
+                for link in all_links:
+                    href = link.get('href')
+                    if href and ('http' in href) and ('google.com' not in href):
+                        logger.info(
+                            f"Found potential news source link: {href}")
+                        return href
+
+        # General redirect handling for other URLs
+        headers = get_realistic_headers(url)
+        response = make_request(url, headers=headers)
+
+        # Check if we got a redirect in the response history
+        if response and response.history:
+            final_url = response.url
+            logger.info(f"URL redirected to: {final_url}")
+            return final_url
+
+        return url
+
+    except Exception as e:
+        logger.error(f"Error following redirects for {url}: {e}")
+        return url  # Return original URL if redirection fails
+
+
 def _configure_newspaper():
     """Configure newspaper with optimal settings"""
     config = newspaper.Config()
@@ -52,189 +156,239 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
         return None
 
     content = None
+    retry_delays = [5000, 10000]  # Progressive delays in milliseconds
 
-    try:
-        logger.info(f"Trying Playwright for {article_url}")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+    # Parse domain for special handling
+    domain = urlparse(article_url).netloc
 
-            # Configure mobile device emulation (iPhone or Android)
-            if 'iPhone' in user_agent:
-                # iPhone SE viewport
-                device = {
-                    'viewport': {'width': 390, 'height': 844},
-                }
-            else:
-                # Generic Android viewport
-                device = {
-                    'viewport': {'width': 412, 'height': 915},
-                }
+    # Known problematic sites that need special handling
+    problematic_sites = {
+        'economist.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
+        'ft.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
+        'wsj.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
+        'nytimes.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True}
+    }
 
-            context = browser.new_context(
-                user_agent=user_agent,
-                **device,
-                locale='en-US'
-            )
+    # Get site-specific settings
+    site_config = next((cfg for site, cfg in problematic_sites.items() if site in domain),
+                       {'wait': 'load', 'timeout': 45000, 'stealth': False})
 
-            # Block unnecessary resource types to speed up loading
-            context.route(
-                '**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,otf,css}', lambda route: route.abort())
+    for attempt, delay in enumerate([0] + retry_delays):
+        try:
+            logger.info(
+                f"Trying Playwright for {article_url} - Attempt {attempt+1} with {delay}ms loading delay")
 
-            page = context.new_page()
+            # Browser launch options
+            browser_args = []
 
-            # Set extra HTTP headers
-            page.set_extra_http_headers({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'DNT': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Upgrade-Insecure-Requests': '1',
-            })
+            # Add stealth mode for problematic sites
+            if site_config['stealth']:
+                browser_args = [
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials'
+                ]
+                logger.info(f"Using stealth mode for {domain}")
 
-            # Navigate to the URL
-            page.goto(article_url, wait_until="domcontentloaded", timeout=30000)
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, args=browser_args)
 
-            # Wait for content to load
-            page.wait_for_timeout(2000)
+                # Configure mobile device emulation (iPhone or Android)
+                if 'iPhone' in user_agent:
+                    # iPhone SE viewport
+                    device = p.devices['iPhone SE']
+                else:
+                    # Generic Android viewport
+                    device = {
+                        'viewport': {'width': 412, 'height': 915},
+                        'device_scale_factor': 2.625,
+                        'is_mobile': True,
+                        'has_touch': True
+                    }
 
-            # Execute cleanup scripts to bypass paywalls and prepare content
+                # Create context with device emulation
+                context = browser.new_context(
+                    user_agent=user_agent,
+                    **device if 'iPhone' not in user_agent else {},
+                    locale='en-US'
+                )
 
-            # Fix date formatting to US English
-            page.evaluate("""
-            (() => { 
-                Object.defineProperty(Intl, 'DateTimeFormat', { 
-                    writable: true, 
-                    value: new Proxy(Intl.DateTimeFormat, { 
-                      construct: (target, args) => new target('en-US', Object.assign({}, args[1])) 
-                    })
-                });
-            })();
-            """)
+                # Apply stealth mode JS if needed
+                if site_config['stealth']:
+                    # Execute stealth JS to avoid detection
+                    context.add_init_script("""
+                    () => {
+                        // Pass webdriver check
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => false,
+                        });
+                        
+                        // Overwrite permissions
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (parameters) => (
+                            parameters.name === 'notifications' ?
+                                Promise.resolve({ state: Notification.permission }) :
+                                originalQuery(parameters)
+                        );
+                        
+                        // Overwrite plugins
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [
+                                {
+                                    0: {type: "application/pdf"},
+                                    description: "Portable Document Format",
+                                    filename: "internal-pdf-viewer",
+                                    length: 1,
+                                    name: "Chrome PDF Plugin"
+                                }
+                            ],
+                        });
+                        
+                        // Overwrite user agent
+                        const userAgent = window.navigator.userAgent;
+                        Object.defineProperty(navigator, 'userAgent', {
+                            get: () => userAgent.replace("Headless", ""),
+                        });
+                    }
+                    """)
 
-            # Click cookie consent buttons
-            page.evaluate("""
-            (() => { 
-                const cookieButtons = Array.from(document.querySelectorAll('button, a'))
-                    .filter(el => el.textContent.toLowerCase().includes('accept') && 
-                        (el.textContent.toLowerCase().includes('cookie') || 
-                         el.textContent.toLowerCase().includes('consent'))); 
-                if(cookieButtons.length > 0) { 
-                    cookieButtons[0].click(); 
-                }
-            })();
-            """)
+                # Block unnecessary resource types for better performance
+                context.route('**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,otf,mp4,webm,ogg,mp3,wav}',
+                              lambda route: route.abort())
 
-            # Remove paywalls, modals, subscribe forms
-            page.evaluate("""
-            (() => { 
-                const paywallElements = Array.from(document.querySelectorAll('div, section'))
-                    .filter(el => el.id.toLowerCase().includes('paywall') || 
-                                 el.className.toLowerCase().includes('paywall') || 
-                                 el.id.toLowerCase().includes('subscribe') || 
-                                 el.className.toLowerCase().includes('subscribe')); 
-                paywallElements.forEach(el => el.remove());
-                
-                document.querySelectorAll('.modal, .modal-backdrop, body > div[style*="position: fixed"]')
-                    .forEach(el => el.remove());
-                    
-                document.body.style.overflow = 'auto';
-            })();
-            """)
+                page = context.new_page()
 
-            # Remove ads, social elements, and non-content elements
-            page.evaluate("""
-            (() => { 
-                document.querySelectorAll('script, style, iframe, .ad, .ads, .advertisement, [class*="social"], [id*="social"], .share, .comments, aside, nav, header:not(article header), footer:not(article footer), [role="complementary"], [role="banner"], [role="navigation"], form, .related, .recommended, .newsletter, .subscription')
-                    .forEach(el => el.remove());
-            })();
-            """)
+                # Set extra HTTP headers for a more realistic browser
+                page.set_extra_http_headers({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'DNT': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
+                })
 
-            # Strip unnecessary attributes
-            page.evaluate("""
-            (() => { 
-                const keepAttributes = ['href', 'src', 'alt', 'title']; 
-                document.querySelectorAll('*').forEach(el => { 
-                    [...el.attributes].forEach(attr => { 
-                        if (!keepAttributes.includes(attr.name.toLowerCase())) { 
-                            el.removeAttribute(attr.name);
-                        }
-                    }); 
-                });
-            })();
-            """)
+                # Set a referrer for better believability
+                page.set_extra_http_headers(
+                    {'Referer': 'https://www.google.com/'})
 
-            # Remove empty elements
-            page.evaluate("""
-            (() => { 
-                function removeEmpty() { 
-                    let removed = 0; 
-                    document.querySelectorAll('div, span, p, section, article').forEach(el => { 
-                        if (!el.hasChildNodes() || el.textContent.trim() === '') { 
-                            el.remove(); 
-                            removed++; 
-                        } 
-                    }); 
-                    return removed; 
-                } 
-                let pass; 
-                do { 
-                    pass = removeEmpty(); 
-                } while(pass > 0);
-            })();
-            """)
-
-            # Wait for a content selector to be available
-            for selector in ['article', '.article', '.content', '.post', '#article', 'main']:
+                # Simplified loading approach to avoid timeouts
                 try:
-                    page.wait_for_selector(selector, timeout=1000)
-                    break
-                except:
-                    continue
+                    # Use a simpler "commit" wait strategy for initial navigation
+                    # This returns when the page receives first non-empty document
+                    logger.info(
+                        f"Navigating to {article_url} with {site_config['wait']} strategy")
+                    page.goto(article_url, timeout=site_config['timeout'],
+                              wait_until=site_config['wait'])
 
-            # Extract article content
-            content_selectors = [
-                'article', 'main', '.post-content', '.article-content',
-                '.entry-content', '.content', '[itemprop="articleBody"]'
-            ]
+                    if delay > 0:
+                        logger.info(
+                            f"Waiting additional {delay}ms for content to load")
+                        page.wait_for_timeout(delay)
 
-            content = ""
-            for selector in content_selectors:
+                        # Gentle scrolling for problematic sites
+                        for i in range(3):
+                            scroll_pos = (i + 1) * 300
+                            page.evaluate(f"window.scrollTo(0, {scroll_pos})")
+                            page.wait_for_timeout(500)
+                        page.evaluate("window.scrollTo(0, 0)")
+
+                except Exception as e:
+                    logger.warning(f"Navigation failed: {e}")
+                    # If we timeout, we'll still try to extract content from whatever loaded
+                    pass
+
+                # Try to get article content even if the page didn't fully load
                 try:
-                    elements = page.query_selector_all(selector)
-                    if elements:
-                        for element in elements:
-                            # Get all paragraphs inside this element
-                            paragraphs = element.query_selector_all('p')
+                    # Extract article content
+                    content_selectors = [
+                        'article', 'main', '.post-content', '.article-content',
+                        '.entry-content', '.content', '[itemprop="articleBody"]',
+                        '.article-body', '.story-body', '.story', '.post-body'
+                    ]
 
-                            paragraph_texts = []
-                            for p in paragraphs:
+                    content = ""
+                    for selector in content_selectors:
+                        try:
+                            logger.debug(f"Trying selector: {selector}")
+                            elements = page.query_selector_all(selector)
+
+                            if elements:
+                                for element in elements:
+                                    # Get all paragraphs inside this element
+                                    paragraphs = element.query_selector_all(
+                                        'p')
+
+                                    if not paragraphs or len(paragraphs) < 3:
+                                        # If no paragraphs found, try getting direct text
+                                        element_text = element.text_content().strip()
+                                        if element_text and len(element_text) > 200:
+                                            content = element_text
+                                            break
+                                    else:
+                                        paragraph_texts = []
+                                        for p in paragraphs:
+                                            text = p.text_content().strip()
+                                            # Skip short paragraphs
+                                            if text and len(text) > 20:
+                                                paragraph_texts.append(text)
+
+                                        # Join paragraphs with double newlines
+                                        element_content = '\n\n'.join(
+                                            paragraph_texts)
+                                        if element_content and len(element_content) > 200:
+                                            content = element_content
+                                            break
+                        except Exception as e:
+                            logger.debug(
+                                f"Error with selector {selector}: {e}")
+                            continue
+
+                        if content:
+                            break
+
+                    # If we still don't have content, try a more aggressive approach
+                    if not content or len(content) < 200:
+                        logger.debug("Trying fallback extraction method")
+                        # Extract all paragraphs from the page
+                        all_paragraphs = page.query_selector_all('p')
+                        paragraph_texts = []
+
+                        for p in all_paragraphs:
+                            try:
                                 text = p.text_content().strip()
-                                # Skip short paragraphs
-                                if text and len(text) > 20:
+                                # Only include substantial paragraphs
+                                if text and len(text) > 50:
                                     paragraph_texts.append(text)
+                            except Exception:
+                                continue
 
-                            # Join paragraphs with double newlines
-                            element_content = '\n\n'.join(paragraph_texts)
-                            if element_content and len(element_content) > 200:
-                                content = element_content
-                                break
-                except Exception:
-                    continue
+                        # Join paragraphs with double newlines
+                        if paragraph_texts:
+                            content = '\n\n'.join(paragraph_texts)
 
-                if content:
-                    break
+                except Exception as e:
+                    logger.error(f"Error extracting content: {e}")
 
-            browser.close()
+                browser.close()
 
-            if content and len(content) > 200:
+                if content and len(content) > 200:
+                    logger.info(
+                        f"Successfully extracted content using Playwright for {article_url} on attempt {attempt+1}")
+                    return content
+
                 logger.info(
-                    f"Successfully extracted content using Playwright for {article_url}")
+                    f"Attempt {attempt+1} failed to extract sufficient content")
 
-    except Exception as e:
-        logger.error(f"Error using Playwright fallback: {e}")
+        except Exception as e:
+            logger.error(
+                f"Error using Playwright fallback (attempt {attempt+1}): {e}")
+
+        # If content was extracted or we've tried all delays, exit the loop
+        if content or attempt >= len(retry_delays):
+            break
 
     return content
 
@@ -299,7 +453,30 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
     try:
         logger.info(f"Extracting content from {article_url}")
 
-        # Get domain from URL to track old articles
+        # Get original domain for logging
+        original_url = article_url
+        original_domain = urlparse(article_url).netloc.lower()
+
+        # Follow redirects to get the real article URL if it's a redirect link
+        # Check if this is likely a redirect URL
+        is_redirect_url = any([
+            ("biztoc.com" in original_domain),
+            ("news.google.com" in original_domain)
+        ])
+
+        if is_redirect_url:
+            # Follow redirects to get the actual article URL
+            article_url = _follow_redirect(article_url)
+
+            if article_url != original_url:
+                # Update domain to the one we actually redirected to
+                redirected_domain = urlparse(article_url).netloc
+                logger.info(
+                    f"Redirected from {original_domain} to {redirected_domain}")
+            else:
+                logger.warning(f"Failed to follow redirect for {original_url}")
+
+        # Get domain from final URL to track old articles
         domain = urlparse(article_url).netloc
 
         # Skip if we've already found 3 old articles from this domain
@@ -346,7 +523,17 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             # Ensure publish_date has timezone info
             article_date = article.publish_date
             if article_date.tzinfo is None:
-                article_date = article_date.replace(tzinfo=timezone.utc)
+                # Create a new datetime object with timezone info
+                article_date = datetime(
+                    year=article_date.year,
+                    month=article_date.month,
+                    day=article_date.day,
+                    hour=article_date.hour,
+                    minute=article_date.minute,
+                    second=article_date.second,
+                    microsecond=article_date.microsecond,
+                    tzinfo=timezone.utc
+                )
 
             if article_date < three_days_ago:
                 # Increment the count of old articles for this domain

@@ -1,0 +1,190 @@
+{
+  "total_failed_feeds": 46,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=1, tm_hour=23, tm_min=8, tm_sec=59, tm_wday=1, tm_yday=91, tm_isdst=0)",
+  "feeds": {
+    "https://thehill.com/opinion/feed/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:22.568479"
+    },
+    "https://www.benzinga.com/markets/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:22.568501"
+    },
+    "http://feeds.benzinga.com/benzinga/markets/options": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:22.568507"
+    },
+    "http://feeds.benzinga.com/benzinga": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:22.568511"
+    },
+    "http://feeds.benzinga.com/benzinga/pre-market-outlook": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:25.559961"
+    },
+    "https://www.latimes.com/politics/rss2.0.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:25.559997"
+    },
+    "https://feeds.businessinsider.com/custom/all": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:25.560010"
+    },
+    "https://www.economist.com/finance-and-economics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:34.923875"
+    },
+    "https://www.economist.com/business/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:34.923888"
+    },
+    "http://feeds.feedburner.com/DrudgeReportFeed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:27:34.923893"
+    },
+    "https://www.usnews.com/rss/the-report": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988709"
+    },
+    "https://www.theatlantic.com/feed/channel/business/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988721"
+    },
+    "https://www.globaltimes.cn/rss/outbrain.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988727"
+    },
+    "https://rss.nytimes.com/services/xml/rss/nyt/US.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988735"
+    },
+    "https://rsshub.app/apnews/topics/apf-topnews": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988744"
+    },
+    "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988750"
+    },
+    "https://feeds.washingtonpost.com/rss/rss_the-fix": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988752"
+    },
+    "https://feeds.washingtonpost.com/rss/national": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988758"
+    },
+    "https://www.theguardian.com/us-news/us-politics/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988764"
+    },
+    "https://www.theguardian.com/us/business/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988833"
+    },
+    "https://www.theguardian.com/business/stock-markets/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988803"
+    },
+    "https://www.theguardian.com/us/commentisfree/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988806"
+    },
+    "https://feedx.net/rss/ap.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988841"
+    },
+    "https://www.telegraph.co.uk/business/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988844"
+    },
+    "https://www.telegraph.co.uk/politics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988847"
+    },
+    "https://www.the-independent.com/news/business/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988851"
+    },
+    "https://www.the-independent.com/news/world/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988853"
+    },
+    "https://feeds.content.dowjones.io/public/rss/RSSWorldNews": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988856"
+    },
+    "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988859"
+    },
+    "https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988866"
+    },
+    "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988869"
+    },
+    "https://nypost.com/world-news/feed/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988878"
+    },
+    "https://nypost.com/business/feed/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988880"
+    },
+    "https://asia.nikkei.com/rss/feed/nar": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988886"
+    },
+    "https://feeds.content.dowjones.io/public/rss/mw_marketpulse": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988890"
+    },
+    "http://feeds.marketwatch.com/marketwatch/realtimeheadlines": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988892"
+    },
+    "https://seekingalpha.com/tag/market-outlook/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988898"
+    },
+    "https://economictimes.indiatimes.com/Opinion/Editorial/rssfeeds/3376910.cms": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988901"
+    },
+    "https://feeds.feedburner.com/hackread": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988903"
+    },
+    "https://feeds.feedburner.com/CalculatedRisk": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988906"
+    },
+    "https://www.businesstimes.com.sg/rss/government-economy": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988909"
+    },
+    "https://www.nakedcapitalism.com/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988913"
+    },
+    "https://feeds.feedburner.com/zerohedge/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988915"
+    },
+    "https://feeds.feedburner.com/TheBigPicture": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988919"
+    },
+    "https://prod-qt-images.s3.amazonaws.com/production/bloombergquint/feed.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988921"
+    },
+    "https://feeds.feedburner.com/ndtvprofit-latest": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-01 22:29:05.988924"
+    }
+  }
+}
