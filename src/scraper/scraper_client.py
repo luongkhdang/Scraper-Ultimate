@@ -49,14 +49,14 @@ class ScraperClient:
         logger.info("Initializing ScraperClient")
         self.unique_domains: Set[str] = set()
 
-        # Initialize rate limiter with specified parameters
+        # Initialize rate limiter with optimized parameters
         self.rate_limiter = RateLimiter(
-            max_concurrent=30,     # Allow 30 concurrent requests
-            global_cooldown_ms=300,  # 300ms global cooldown
-            domain_cooldown_ms=1500  # 1.5s per domain cooldown
+            max_concurrent=50,     # Increased from 30 to 50 concurrent requests
+            global_cooldown_ms=100,  # Reduced from 300ms to 100ms global cooldown
+            domain_cooldown_ms=500   # Reduced from 1500ms to 500ms per domain cooldown
         )
         logger.info(
-            "Rate limiter initialized with settings: 30 concurrent requests, 300ms global cooldown, 1.5s per domain")
+            "Rate limiter initialized with settings: 50 concurrent requests, 100ms global cooldown, 500ms per domain")
 
     def _get_domain_from_url(self, url: str) -> str:
         """Extract the domain from a URL for rate limiting purposes"""
@@ -155,21 +155,72 @@ class ScraperClient:
             if db_client:
                 logger.info(
                     f"Checking {len(date_filtered_content)} URLs against database")
-                new_content = []
-                existing_count = 0
+
+                # Extract all URLs for batch checking
+                urls_to_check = []
+                url_to_item_map = {}
 
                 for item in date_filtered_content:
                     url = item.get('link', '')
-                    if not url:
-                        continue
+                    if url:
+                        urls_to_check.append(url)
+                        url_to_item_map[url] = item
 
-                    # Check if URL exists in database
-                    exists = db_client.check_url_in_database(url)
+                if not urls_to_check:
+                    logger.warning("No valid URLs found in feed items")
+                    return []
 
-                    if exists:
-                        existing_count += 1
+                try:
+                    # Try to use the batch check method if available
+                    if hasattr(db_client, 'check_urls_in_database'):
+                        # Batch check URLs against database
+                        url_exists_map = db_client.check_urls_in_database(
+                            urls_to_check)
+
+                        # Filter out existing URLs
+                        new_content = []
+                        existing_count = 0
+
+                        for url, exists in url_exists_map.items():
+                            if exists:
+                                existing_count += 1
+                            else:
+                                new_content.append(url_to_item_map[url])
                     else:
-                        new_content.append(item)
+                        # Fallback to individual checks if batch method not available
+                        logger.warning(
+                            "Batch URL checking not available, falling back to individual checks")
+                        new_content = []
+                        existing_count = 0
+
+                        for url in urls_to_check:
+                            # Check if URL exists in database
+                            exists = db_client.check_url_in_database(url)
+
+                            if exists:
+                                existing_count += 1
+                            else:
+                                new_content.append(url_to_item_map[url])
+                except Exception as e:
+                    logger.error(f"Error checking URLs against database: {e}")
+                    # Fallback to individual checks on exception
+                    new_content = []
+                    existing_count = 0
+
+                    for url in urls_to_check:
+                        try:
+                            # Check if URL exists in database
+                            exists = db_client.check_url_in_database(url)
+
+                            if exists:
+                                existing_count += 1
+                            else:
+                                new_content.append(url_to_item_map[url])
+                        except Exception as url_check_error:
+                            logger.error(
+                                f"Error checking URL {url}: {url_check_error}")
+                            # Include the item if we can't determine if it exists
+                            new_content.append(url_to_item_map[url])
 
                 logger.info(
                     f"Filtered out {existing_count} existing URLs from RSS feed")

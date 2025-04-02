@@ -1,5 +1,5 @@
-https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
 https://biztoc.com/feed
+https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
 https://thehill.com/policy/feed/
 https://thehill.com/business/feed/
 https://thehill.com/opinion/feed/
@@ -26,7 +26,6 @@ https://www.economist.com/united-states/rss.xml
 https://www.economist.com/international/rss.xml
 https://www.economist.com/finance-and-economics/rss.xml
 https://www.economist.com/business/rss.xml
-https://www.chron.com/rss/feed/News-270.php
 http://feeds.feedburner.com/DrudgeReportFeed
 https://www.usnews.com/rss/money
 https://www.usnews.com/rss/news

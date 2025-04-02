@@ -91,8 +91,10 @@ class RateLimiter:
             # Check for domain-specific cooldown, applying error backoff if needed
             domain_cooldown = self.domain_cooldown_ms
             if domain in self.domain_error_count and self.domain_error_count[domain] > 0:
-                # Exponential backoff based on error count, capped at 120 seconds
-                backoff_factor = min(2 ** self.domain_error_count[domain], 60)
+                # Use a less aggressive backoff formula: 1.5^error_count instead of 2^error_count
+                # Cap at 30 seconds instead of 60 seconds (30000ms)
+                backoff_factor = min(
+                    1.5 ** self.domain_error_count[domain], 30)
                 domain_cooldown = self.domain_cooldown_ms * backoff_factor
                 logger.debug(f"Rate limit: domain {domain} has error count {self.domain_error_count[domain]}, "
                              f"cooldown increased to {domain_cooldown}ms")
@@ -137,10 +139,11 @@ class RateLimiter:
             domain: Domain that was successfully requested
         """
         with self.lock:
-            # After a successful request, reduce the error count
+            # After a successful request, reduce the error count more aggressively
             if domain in self.domain_error_count and self.domain_error_count[domain] > 0:
+                # Reduce by 2 instead of 1 to recover faster from errors
                 self.domain_error_count[domain] = max(
-                    0, self.domain_error_count[domain] - 1)
+                    0, self.domain_error_count[domain] - 2)
                 logger.debug(
                     f"Rate limit: reduced error count for {domain} to {self.domain_error_count[domain]}")
 
@@ -157,8 +160,8 @@ class RateLimiter:
             logger.info(
                 f"Rate limit: increased error count for {domain} to {self.domain_error_count[domain]}")
 
-            # Calculate new backoff time
-            backoff_factor = min(2 ** self.domain_error_count[domain], 60)
+            # Calculate new backoff time using less aggressive formula
+            backoff_factor = min(1.5 ** self.domain_error_count[domain], 30)
             domain_cooldown = self.domain_cooldown_ms * backoff_factor
             logger.info(
                 f"Rate limit: domain {domain} cooldown increased to {domain_cooldown}ms ({domain_cooldown/1000:.1f}s)")

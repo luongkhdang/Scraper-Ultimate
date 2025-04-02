@@ -43,8 +43,8 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Scraper configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '30'))
-PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '100'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '50'))
+PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '250'))
 
 
 def process_rss_feed(feed_url: str, scraper: ScraperClient, db_client: PostgreSQLClient) -> int:

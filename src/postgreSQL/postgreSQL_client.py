@@ -7,6 +7,7 @@ Exported Functions:
 - update_article_content(article_id: int, content: str, error_message: Optional[str] = None, domain: Optional[str] = None) -> bool: Updates article with scraped content
 - get_pending_articles(limit: int = 100) -> list: Gets articles with 'Pending' status
 - check_url_in_database(url: str) -> bool: Checks if a URL exists in the database
+- check_urls_in_database(urls: List[str]) -> Dict[str, bool]: Batch checks multiple URLs against the database
 
 Related Files:
 - main.py: Main orchestration file that uses this client
@@ -17,8 +18,9 @@ import sys
 import logging
 import psycopg2
 from psycopg2.extras import Json
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from dotenv import load_dotenv
+from psycopg2 import pool
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -37,6 +39,10 @@ DB_CONFIG = {
     'port': os.environ.get('DB_PORT', '5432')
 }
 
+# Configure connection pool size
+MIN_CONNECTIONS = int(os.environ.get('DB_MIN_CONNECTIONS', '5'))
+MAX_CONNECTIONS = int(os.environ.get('DB_MAX_CONNECTIONS', '20'))
+
 
 class PostgreSQLClient:
     def __init__(self, db_config=None):
@@ -45,9 +51,40 @@ class PostgreSQLClient:
         logger.info(
             f"Database connection: {self.db_config['dbname']} on {self.db_config['host']}:{self.db_config['port']} as {self.db_config['user']}")
 
+        # Initialize connection pool
+        self._connection_pool = None
+        self._init_connection_pool()
+
+    def _init_connection_pool(self):
+        """Initialize the connection pool"""
+        try:
+            self._connection_pool = pool.ThreadedConnectionPool(
+                MIN_CONNECTIONS,
+                MAX_CONNECTIONS,
+                **self.db_config
+            )
+            logger.info(
+                f"Connection pool created with min={MIN_CONNECTIONS}, max={MAX_CONNECTIONS} connections")
+        except Exception as e:
+            logger.error(f"Error creating connection pool: {e}")
+            # Fall back to single connections if pool creation fails
+            self._connection_pool = None
+
     def get_connection(self):
         """Get a connection to the database"""
-        return psycopg2.connect(**self.db_config)
+        try:
+            if self._connection_pool:
+                return self._connection_pool.getconn()
+            else:
+                return psycopg2.connect(**self.db_config)
+        except Exception as e:
+            logger.error(f"Error getting database connection: {e}")
+            raise
+
+    def release_connection(self, conn):
+        """Return a connection to the pool"""
+        if self._connection_pool and conn:
+            self._connection_pool.putconn(conn)
 
     def setup_database(self) -> None:
         """Create the necessary tables in the database if they don't exist"""
@@ -103,7 +140,7 @@ class PostgreSQLClient:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)
 
     def store_article_url(self, article_data: Dict) -> bool:
         """
@@ -157,7 +194,7 @@ class PostgreSQLClient:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)
 
     def update_article_content(self, article_id: int, content: str, error_message: Optional[str] = None, domain: Optional[str] = None) -> bool:
         """
@@ -220,7 +257,7 @@ class PostgreSQLClient:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)
 
     def get_pending_articles(self, limit: int = 100) -> list:
         """
@@ -264,30 +301,90 @@ class PostgreSQLClient:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)
 
     def check_url_in_database(self, url: str) -> bool:
-        """Check if an article URL exists in the database"""
+        """
+        Check if a URL already exists in the database
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL exists, False otherwise
+        """
         conn = None
         cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Check if URL exists
             cursor.execute(
-                "SELECT 1 FROM articles WHERE url = %s LIMIT 1", (url,))
-            exists = cursor.fetchone() is not None
-
-            return exists
+                "SELECT EXISTS(SELECT 1 FROM articles WHERE url = %s)",
+                (url,)
+            )
+            return cursor.fetchone()[0]
         except Exception as e:
-            logger.error(f"Error checking URL {url} in database: {e}")
+            logger.error(f"Error checking URL in database: {e}")
             return False
         finally:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)
+
+    def check_urls_in_database(self, urls: List[str]) -> Dict[str, bool]:
+        """
+        Check if multiple URLs already exist in the database (batch operation)
+
+        Args:
+            urls: List of URLs to check
+
+        Returns:
+            Dictionary mapping each URL to a boolean indicating if it exists
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Create a temporary table for the URLs
+            cursor.execute("""
+                CREATE TEMP TABLE temp_urls (url TEXT PRIMARY KEY) ON COMMIT DROP
+            """)
+
+            # Insert URLs into the temporary table using executemany for efficiency
+            args = [(url,) for url in urls]
+            cursor.executemany("""
+                INSERT INTO temp_urls (url) VALUES (%s)
+            """, args)
+
+            # Join with articles table to find existing URLs
+            cursor.execute("""
+                SELECT t.url, EXISTS(SELECT 1 FROM articles a WHERE a.url = t.url)
+                FROM temp_urls t
+            """)
+
+            # Create result map
+            url_exists_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            # For any URLs not in the result, they don't exist
+            for url in urls:
+                if url not in url_exists_map:
+                    url_exists_map[url] = False
+
+            return url_exists_map
+        except Exception as e:
+            logger.error(f"Error batch checking URLs in database: {e}")
+            # Fall back to individual checks on error
+            logger.info("Falling back to individual URL checks")
+            return {url: self.check_url_in_database(url) for url in urls}
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                self.release_connection(conn)
 
     def get_failed_domains(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -340,4 +437,4 @@ class PostgreSQLClient:
             if cursor:
                 cursor.close()
             if conn:
-                conn.close()
+                self.release_connection(conn)

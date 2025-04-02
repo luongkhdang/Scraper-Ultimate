@@ -58,92 +58,38 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
         final_domain = domain  # Initialize with original domain
 
         # BizToc redirects
-        if "biztoc.com" in domain and ("/x/" in url):
-            logger.info("Detected BizToc redirect URL")
-            # For BizToc URLs, we need to make a request and extract the destination from the page
+        if "biztoc.com" in domain:
+            logger.info(
+                "Detected BizToc URL, looking for original article link")
             headers = get_realistic_headers(url)
             response = make_request(url, headers=headers)
 
-            if response and response.status_code in (301, 302, 303, 307, 308):
-                redirect_url = response.headers.get('Location')
-                if redirect_url:
-                    logger.info(f"BizToc redirecting to: {redirect_url}")
-                    final_domain = urlparse(redirect_url).netloc.lower()
-                    return redirect_url, final_domain
-
-            # If no redirect header, try to extract from the HTML
             if response and response.text:
                 soup = BeautifulSoup(response.text, 'html.parser')
 
-                # First, try to find the original article URL from the meta tags
-                og_url = soup.find('meta', property='og:url')
-                if og_url and og_url.get('content') and 'biztoc.com' not in og_url.get('content'):
-                    source_url = og_url.get('content')
-                    logger.info(
-                        f"Found original URL in og:url meta tag: {source_url}")
+                # Look for the specific class that contains the original URL as shown in the screenshot
+                url_box = soup.find('a', class_='urlbox drops text-mono')
+                if url_box and url_box.get('href'):
+                    source_url = url_box.get('href')
+                    logger.info(f"Found original URL in urlbox: {source_url}")
                     final_domain = urlparse(source_url).netloc.lower()
                     return source_url, final_domain
 
-                # Second, check if there's a canonical link that's not biztoc.com
-                canonical = soup.find('link', rel='canonical')
-                if canonical and canonical.get('href') and 'biztoc.com' not in canonical.get('href'):
-                    source_url = canonical.get('href')
-                    logger.info(
-                        f"Found original URL in canonical link: {source_url}")
-                    final_domain = urlparse(source_url).netloc.lower()
-                    return source_url, final_domain
-
-                # Third, look for a source URL directly mentioned in the text
-                # BizToc typically shows the source URL at the beginning or end of the article
-                source_text = soup.find('a', href=True, text=lambda t: t and (
-                    'zerohedge.com' in t or 'reuters.com' in t or '.com' in t))
-                if source_text:
-                    source_url = source_text.get('href')
-                    if source_url and source_url.startswith('http'):
-                        logger.info(f"Found source URL in text: {source_url}")
+                # Fallback - check for href in span with the same class if 'a' tag not found
+                url_box_span = soup.find(
+                    'span', class_='urlbox drops text-mono')
+                if url_box_span:
+                    parent_link = url_box_span.find_parent('a')
+                    if parent_link and parent_link.get('href'):
+                        source_url = parent_link.get('href')
+                        logger.info(
+                            f"Found original URL in urlbox span parent: {source_url}")
                         final_domain = urlparse(source_url).netloc.lower()
                         return source_url, final_domain
 
-                # Fourth, try to find any link that mentions a domain other than biztoc.com
-                paragraphs = soup.find_all('p')
-                for p in paragraphs:
-                    # Check for text that often indicates a source link
-                    if "This story appeared on" in p.text or "Source:" in p.text:
-                        links = p.find_all('a')
-                        for link in links:
-                            href = link.get('href')
-                            if href and not href.startswith('http'):
-                                href = f"https://biztoc.com{href}"
-                            if href and 'biztoc.com' not in href:
-                                logger.info(
-                                    f"Found source link in paragraph: {href}")
-                                final_domain = urlparse(href).netloc.lower()
-                                return href, final_domain
-
-                # Finally, look for any "Read full article" or similar links
-                read_links = soup.find_all('a', text=re.compile(
-                    r'Read full article|Continue reading|View original|Original Article|Source', re.IGNORECASE))
-
-                if read_links and len(read_links) > 0:
-                    for link in read_links:
-                        href = link.get('href')
-                        if href and not href.startswith('http'):
-                            href = f"https://biztoc.com{href}"
-                        if href and 'biztoc.com' not in href:
-                            logger.info(
-                                f"Found redirect link in BizToc page: {href}")
-                            final_domain = urlparse(href).netloc.lower()
-                            return href, final_domain
-
-                # If all above methods fail, try to find any external link in the page
-                all_links = soup.find_all('a', href=True)
-                for link in all_links:
-                    href = link.get('href')
-                    if href and href.startswith('http') and 'biztoc.com' not in href and not any(s in href for s in ['facebook.com', 'twitter.com', 'login', 'signup']):
-                        logger.info(
-                            f"Found external link in BizToc page: {href}")
-                        final_domain = urlparse(href).netloc.lower()
-                        return href, final_domain
+            # If we couldn't find the URL box, use the original URL
+            logger.warning(
+                "Couldn't find original URL on BizToc page, using original URL")
 
         # Google News redirects
         elif "news.google.com" in domain and "/articles/" in url:
@@ -225,6 +171,7 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
 
     # Parse domain for special handling
     domain = urlparse(article_url).netloc
+    is_biztoc = "biztoc.com" in domain.lower()
 
     # Known problematic sites that need special handling
     problematic_sites = {
@@ -339,31 +286,80 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                 page.set_extra_http_headers(
                     {'Referer': 'https://www.google.com/'})
 
-                # Simplified loading approach to avoid timeouts
-                try:
-                    # Use a simpler "commit" wait strategy for initial navigation
-                    # This returns when the page receives first non-empty document
+                # Special handling for BizToc URLs
+                if is_biztoc:
                     logger.info(
-                        f"Navigating to {article_url} with {site_config['wait']} strategy")
-                    page.goto(article_url, timeout=site_config['timeout'],
-                              wait_until=site_config['wait'])
+                        "BizToc URL detected in Playwright, extracting original URL")
 
-                    if delay > 0:
+                    try:
+                        # Navigate to the BizToc page first
+                        page.goto(article_url, timeout=30000,
+                                  wait_until='domcontentloaded')
+
+                        # Look for the element with class "urlbox drops text-mono"
+                        page.wait_for_selector(
+                            '.urlbox.drops.text-mono', timeout=10000)
+
+                        # Extract the original URL from the element
+                        original_url = page.evaluate("""
+                            () => {
+                                // Try to find the link with the class
+                                const linkElement = document.querySelector('a.urlbox.drops.text-mono');
+                                if (linkElement) {
+                                    return linkElement.href;
+                                }
+                                
+                                // Fallback to span inside anchor
+                                const spanElement = document.querySelector('span.urlbox.drops.text-mono');
+                                if (spanElement && spanElement.closest('a')) {
+                                    return spanElement.closest('a').href;
+                                }
+                                
+                                return null;
+                            }
+                        """)
+
+                        if original_url:
+                            logger.info(
+                                f"Found original URL on BizToc: {original_url}")
+                            # Update the article URL to the original source
+                            article_url = original_url
+
+                            # Now navigate to the original article
+                            logger.info(
+                                f"Navigating to original article: {article_url}")
+                            page.goto(article_url, timeout=site_config['timeout'],
+                                      wait_until=site_config['wait'])
+                        else:
+                            logger.warning(
+                                "Could not find original URL on BizToc page")
+                    except Exception as e:
+                        logger.error(
+                            f"Error handling BizToc URL in Playwright: {e}")
+                else:
+                    # Standard navigation for non-BizToc URLs
+                    try:
+                        # Use a simpler "commit" wait strategy for initial navigation
                         logger.info(
-                            f"Waiting additional {delay}ms for content to load")
-                        page.wait_for_timeout(delay)
+                            f"Navigating to {article_url} with {site_config['wait']} strategy")
+                        page.goto(article_url, timeout=site_config['timeout'],
+                                  wait_until=site_config['wait'])
+                    except Exception as e:
+                        logger.warning(f"Navigation failed: {e}")
+                        # If we timeout, we'll still try to extract content from whatever loaded
+                        pass
 
-                        # Gentle scrolling for problematic sites
-                        for i in range(3):
-                            scroll_pos = (i + 1) * 300
-                            page.evaluate(f"window.scrollTo(0, {scroll_pos})")
-                            page.wait_for_timeout(500)
-                        page.evaluate("window.scrollTo(0, 0)")
+                if delay > 0:
+                    logger.info(
+                        f"Waiting additional {delay}ms for content to load")
+                    page.wait_for_timeout(delay)
 
-                except Exception as e:
-                    logger.warning(f"Navigation failed: {e}")
-                    # If we timeout, we'll still try to extract content from whatever loaded
-                    pass
+                    # Gentle scrolling for problematic sites
+                    for i in range(3):
+                        scroll_pos = (i + 1) * 300
+                        page.evaluate(f"window.scrollTo(0, {scroll_pos})")
+                        page.wait_for_timeout(500)
+                    page.evaluate("window.scrollTo(0, 0)")
 
                 # Try to get article content even if the page didn't fully load
                 try:
@@ -522,10 +518,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
         original_url = article_url
         original_domain = urlparse(article_url).netloc.lower()
 
+        # Special handling for BizToc URLs
+        is_biztoc = "biztoc.com" in original_domain
+
         # Follow redirects to get the real article URL if it's a redirect link
         # Check if this is likely a redirect URL
         is_redirect_url = any([
-            ("biztoc.com" in original_domain),
+            is_biztoc,
             ("news.google.com" in original_domain),
             ("/redirect/" in article_url),
             ("/r?" in article_url),
@@ -541,6 +540,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                 # Update domain to the one we actually redirected to
                 logger.info(
                     f"Redirected from {original_domain} to {final_domain}")
+
+                # For BizToc, add a delay to ensure the target page has time to load
+                if is_biztoc:
+                    logger.info(
+                        "BizToc URL detected, adding delay before scraping target page")
+                    # Simple delay to ensure the target page loads
+                    time.sleep(2)
             else:
                 logger.warning(f"Failed to follow redirect for {original_url}")
 

@@ -22,8 +22,8 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
-PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '100'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '50'))
+PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '250'))
 
 
 def process_article_content(article: Dict, scraper, db_client) -> bool:
@@ -120,9 +120,6 @@ def process_pending_articles(scraper, db_client, batch_size: int = PENDING_BATCH
                 except Exception as e:
                     logger.error(
                         f"Error processing article {article['url']}: {e}")
-
-                # Add a small delay between requests
-                time.sleep(0.5)
 
         return success_count
 

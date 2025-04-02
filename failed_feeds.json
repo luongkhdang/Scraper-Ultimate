@@ -1,0 +1,10 @@
+{
+  "total_failed_feeds": 1,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=2, tm_hour=7, tm_min=56, tm_sec=48, tm_wday=2, tm_yday=92, tm_isdst=0)",
+  "feeds": {
+    "https://biztoc.com/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 07:56:48.970233"
+    }
+  }
+}
