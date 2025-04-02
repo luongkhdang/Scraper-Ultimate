@@ -9,7 +9,7 @@ Related Files:
 - src/scraper/scraper_hooks/url_extractor.py: Provides URLs for this module to process
 """
 import newspaper
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Tuple
 import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -38,8 +38,8 @@ except ImportError:
 domains_with_old_articles = {}  # domain -> count of old articles
 
 
-def _follow_redirect(url: str) -> str:
-    """Follow URL redirects and return the final destination URL
+def _follow_redirect(url: str) -> Tuple[str, str]:
+    """Follow URL redirects and return the final destination URL and domain
 
     This is particularly useful for RSS feed links that redirect to the actual article
 
@@ -47,7 +47,7 @@ def _follow_redirect(url: str) -> str:
         url: The URL that may contain a redirect
 
     Returns:
-        The final destination URL after following all redirects
+        Tuple containing (final_url, final_domain) after following all redirects
     """
     try:
         logger.info(f"Following redirects for {url}")
@@ -55,6 +55,7 @@ def _follow_redirect(url: str) -> str:
         # Handle special cases for known redirect patterns
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.lower()
+        final_domain = domain  # Initialize with original domain
 
         # BizToc redirects
         if "biztoc.com" in domain and ("/x/" in url):
@@ -67,23 +68,82 @@ def _follow_redirect(url: str) -> str:
                 redirect_url = response.headers.get('Location')
                 if redirect_url:
                     logger.info(f"BizToc redirecting to: {redirect_url}")
-                    return redirect_url
+                    final_domain = urlparse(redirect_url).netloc.lower()
+                    return redirect_url, final_domain
 
             # If no redirect header, try to extract from the HTML
             if response and response.text:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                # BizToc typically has a "Read full article" link
+
+                # First, try to find the original article URL from the meta tags
+                og_url = soup.find('meta', property='og:url')
+                if og_url and og_url.get('content') and 'biztoc.com' not in og_url.get('content'):
+                    source_url = og_url.get('content')
+                    logger.info(
+                        f"Found original URL in og:url meta tag: {source_url}")
+                    final_domain = urlparse(source_url).netloc.lower()
+                    return source_url, final_domain
+
+                # Second, check if there's a canonical link that's not biztoc.com
+                canonical = soup.find('link', rel='canonical')
+                if canonical and canonical.get('href') and 'biztoc.com' not in canonical.get('href'):
+                    source_url = canonical.get('href')
+                    logger.info(
+                        f"Found original URL in canonical link: {source_url}")
+                    final_domain = urlparse(source_url).netloc.lower()
+                    return source_url, final_domain
+
+                # Third, look for a source URL directly mentioned in the text
+                # BizToc typically shows the source URL at the beginning or end of the article
+                source_text = soup.find('a', href=True, text=lambda t: t and (
+                    'zerohedge.com' in t or 'reuters.com' in t or '.com' in t))
+                if source_text:
+                    source_url = source_text.get('href')
+                    if source_url and source_url.startswith('http'):
+                        logger.info(f"Found source URL in text: {source_url}")
+                        final_domain = urlparse(source_url).netloc.lower()
+                        return source_url, final_domain
+
+                # Fourth, try to find any link that mentions a domain other than biztoc.com
+                paragraphs = soup.find_all('p')
+                for p in paragraphs:
+                    # Check for text that often indicates a source link
+                    if "This story appeared on" in p.text or "Source:" in p.text:
+                        links = p.find_all('a')
+                        for link in links:
+                            href = link.get('href')
+                            if href and not href.startswith('http'):
+                                href = f"https://biztoc.com{href}"
+                            if href and 'biztoc.com' not in href:
+                                logger.info(
+                                    f"Found source link in paragraph: {href}")
+                                final_domain = urlparse(href).netloc.lower()
+                                return href, final_domain
+
+                # Finally, look for any "Read full article" or similar links
                 read_links = soup.find_all('a', text=re.compile(
-                    r'Read full article|Continue reading|View original', re.IGNORECASE))
+                    r'Read full article|Continue reading|View original|Original Article|Source', re.IGNORECASE))
+
                 if read_links and len(read_links) > 0:
                     for link in read_links:
                         href = link.get('href')
                         if href and not href.startswith('http'):
                             href = f"https://biztoc.com{href}"
-                        if href:
+                        if href and 'biztoc.com' not in href:
                             logger.info(
                                 f"Found redirect link in BizToc page: {href}")
-                            return href
+                            final_domain = urlparse(href).netloc.lower()
+                            return href, final_domain
+
+                # If all above methods fail, try to find any external link in the page
+                all_links = soup.find_all('a', href=True)
+                for link in all_links:
+                    href = link.get('href')
+                    if href and href.startswith('http') and 'biztoc.com' not in href and not any(s in href for s in ['facebook.com', 'twitter.com', 'login', 'signup']):
+                        logger.info(
+                            f"Found external link in BizToc page: {href}")
+                        final_domain = urlparse(href).netloc.lower()
+                        return href, final_domain
 
         # Google News redirects
         elif "news.google.com" in domain and "/articles/" in url:
@@ -98,7 +158,8 @@ def _follow_redirect(url: str) -> str:
                 redirect_url = response.headers.get('Location')
                 if redirect_url:
                     logger.info(f"Google News redirecting to: {redirect_url}")
-                    return redirect_url
+                    final_domain = urlparse(redirect_url).netloc.lower()
+                    return redirect_url, final_domain
 
             # If no redirect in headers, try to extract from content
             if response and response.text:
@@ -112,7 +173,8 @@ def _follow_redirect(url: str) -> str:
                             href = f"https://news.google.com{href[1:]}"
                         logger.info(
                             f"Found redirect link in Google News page: {href}")
-                        return href
+                        final_domain = urlparse(href).netloc.lower()
+                        return href, final_domain
 
                 # Look for other possible redirect links
                 all_links = soup.find_all('a')
@@ -121,7 +183,8 @@ def _follow_redirect(url: str) -> str:
                     if href and ('http' in href) and ('google.com' not in href):
                         logger.info(
                             f"Found potential news source link: {href}")
-                        return href
+                        final_domain = urlparse(href).netloc.lower()
+                        return href, final_domain
 
         # General redirect handling for other URLs
         headers = get_realistic_headers(url)
@@ -131,13 +194,15 @@ def _follow_redirect(url: str) -> str:
         if response and response.history:
             final_url = response.url
             logger.info(f"URL redirected to: {final_url}")
-            return final_url
+            final_domain = urlparse(final_url).netloc.lower()
+            return final_url, final_domain
 
-        return url
+        return url, final_domain
 
     except Exception as e:
         logger.error(f"Error following redirects for {url}: {e}")
-        return url  # Return original URL if redirection fails
+        # Return original URL and domain if redirection fails
+        return url, urlparse(url).netloc.lower()
 
 
 def _configure_newspaper():
@@ -461,18 +526,21 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
         # Check if this is likely a redirect URL
         is_redirect_url = any([
             ("biztoc.com" in original_domain),
-            ("news.google.com" in original_domain)
+            ("news.google.com" in original_domain),
+            ("/redirect/" in article_url),
+            ("/r?" in article_url),
+            ("url=" in article_url)
         ])
 
+        final_domain = original_domain
         if is_redirect_url:
             # Follow redirects to get the actual article URL
-            article_url = _follow_redirect(article_url)
+            article_url, final_domain = _follow_redirect(article_url)
 
             if article_url != original_url:
                 # Update domain to the one we actually redirected to
-                redirected_domain = urlparse(article_url).netloc
                 logger.info(
-                    f"Redirected from {original_domain} to {redirected_domain}")
+                    f"Redirected from {original_domain} to {final_domain}")
             else:
                 logger.warning(f"Failed to follow redirect for {original_url}")
 
@@ -557,7 +625,9 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             'content': article.text,
             'authors': article.authors,
             'published_date': article.publish_date.isoformat() if article.publish_date else None,
-            'scraped_at': datetime.now(timezone.utc).isoformat()
+            'scraped_at': datetime.now(timezone.utc).isoformat(),
+            'original_domain': original_domain,
+            'final_domain': final_domain
         }
 
         # Fallback for when newspaper3k fails to extract content properly

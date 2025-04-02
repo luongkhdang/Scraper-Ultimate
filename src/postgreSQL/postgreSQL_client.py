@@ -4,7 +4,7 @@ PostgreSQL Database Client: Handles database connections and operations for the 
 Exported Functions:
 - setup_database() -> None: Sets up required database tables
 - store_article_url(article_data: Dict) -> bool: Stores article URL and metadata from RSS
-- update_article_content(article_id: int, content: str, error_message: Optional[str] = None) -> bool: Updates article with scraped content
+- update_article_content(article_id: int, content: str, error_message: Optional[str] = None, domain: Optional[str] = None) -> bool: Updates article with scraped content
 - get_pending_articles(limit: int = 100) -> list: Gets articles with 'Pending' status
 - check_url_in_database(url: str) -> bool: Checks if a URL exists in the database
 
@@ -159,7 +159,7 @@ class PostgreSQLClient:
             if conn:
                 conn.close()
 
-    def update_article_content(self, article_id: int, content: str, error_message: Optional[str] = None) -> bool:
+    def update_article_content(self, article_id: int, content: str, error_message: Optional[str] = None, domain: Optional[str] = None) -> bool:
         """
         Update article with scraped content or error message
 
@@ -167,6 +167,7 @@ class PostgreSQLClient:
             article_id: ID of the article to update
             content: Article content (can be None if scraping failed)
             error_message: Error message if scraping failed
+            domain: Updated domain if article was redirected
 
         Returns:
             True if successful, False otherwise
@@ -184,8 +185,10 @@ class PostgreSQLClient:
                     SET proceeding_status = 'FAILED',
                         error_message = %s,
                         scraped_at = CURRENT_TIMESTAMP
+                        {}
                     WHERE id = %s
-                """, (error_message, article_id))
+                """.format("," + "domain = %s" if domain else ""),
+                    (error_message, domain, article_id) if domain else (error_message, article_id))
                 status = "FAILED"
             else:
                 # Update with content and mark as ReadyForReview
@@ -194,12 +197,19 @@ class PostgreSQLClient:
                     SET proceeding_status = 'ReadyForReview',
                         content = %s,
                         scraped_at = CURRENT_TIMESTAMP
+                        {}
                     WHERE id = %s
-                """, (content, article_id))
+                """.format("," + "domain = %s" if domain else ""),
+                    (content, domain, article_id) if domain else (content, article_id))
                 status = "ReadyForReview"
 
             conn.commit()
-            logger.info(f"Updated article ID {article_id}: Status = {status}")
+            if domain:
+                logger.info(
+                    f"Updated article ID {article_id}: Status = {status}, Domain updated to {domain}")
+            else:
+                logger.info(
+                    f"Updated article ID {article_id}: Status = {status}")
             return True
         except Exception as e:
             logger.error(f"Error updating article {article_id}: {e}")

@@ -43,7 +43,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Scraper configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '30'))
 PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '100'))
 
 

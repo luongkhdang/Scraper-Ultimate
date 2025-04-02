@@ -51,12 +51,12 @@ class ScraperClient:
 
         # Initialize rate limiter with specified parameters
         self.rate_limiter = RateLimiter(
-            max_concurrent=10,      # Allow 10 concurrent requests
-            global_cooldown_ms=500,  # 500ms global cooldown
-            domain_cooldown_ms=2000  # 2s per domain cooldown
+            max_concurrent=30,     # Allow 30 concurrent requests
+            global_cooldown_ms=300,  # 300ms global cooldown
+            domain_cooldown_ms=1500  # 1.5s per domain cooldown
         )
         logger.info(
-            "Rate limiter initialized with settings: 10 concurrent requests, 500ms global cooldown, 2s per domain")
+            "Rate limiter initialized with settings: 30 concurrent requests, 300ms global cooldown, 1.5s per domain")
 
     def _get_domain_from_url(self, url: str) -> str:
         """Extract the domain from a URL for rate limiting purposes"""

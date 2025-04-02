@@ -17,12 +17,13 @@ import logging
 import time
 import requests
 import random
+import json
 from typing import List, Set, Dict, Any, Optional
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin, urlunparse
 
 # Import local modules
-from .utils import make_request, random_delay
+from .utils import make_request, random_delay, get_random_user_agent
 from .url_validator import is_valid_article_url
 
 # Set up logging
@@ -44,6 +45,9 @@ USER_AGENTS = [
     # Android devices
     'Mozilla/5.0 (Linux; Android 14; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
     'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
+    # Desktop browsers
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
 ]
 
 # Rotating referrers (similar to puppeteer.ts)
@@ -63,6 +67,35 @@ ADDITIONAL_HEADERS = {
     'DNT': '1',
     'Accept-Language': 'en-US,en;q=0.5',
     'Upgrade-Insecure-Requests': '1',
+}
+
+# Known problematic feed domains that need special handling
+PROBLEMATIC_FEEDS = {
+    'feeds.content.dowjones.io': {'method': 'direct_parse', 'parser': 'xml'},
+    'economist.com': {'method': 'desktop_agent', 'parser': 'html.parser'},
+    'wsj.com': {'method': 'desktop_agent', 'parser': 'html.parser'},
+    'telegraph.co.uk': {'method': 'desktop_agent', 'parser': 'html.parser'},
+    'theguardian.com': {'method': 'direct_parse', 'parser': 'xml'},
+    'nytimes.com': {'method': 'desktop_agent', 'parser': 'html.parser'},
+    'washingtonpost.com': {'method': 'direct_parse', 'parser': 'xml'},
+    'benzinga.com': {'method': 'feedburner_fix', 'parser': 'xml'},
+    'feeds.feedburner.com': {'method': 'feedburner_fix', 'parser': 'xml'},
+    'marketwatch.com': {'method': 'desktop_agent', 'parser': 'html.parser'}
+}
+
+# Parser options for different feed formats
+FEED_PARSERS = ['xml', 'html.parser', 'lxml', 'html5lib']
+
+# Special case headers for sites that block requests
+SPECIAL_HEADERS = {
+    'economist.com': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+    },
+    'wsj.com': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+    }
 }
 
 
@@ -345,6 +378,7 @@ def extract_urls_from_rss_feeds(website_url: str, base_url: str, feed_urls: List
 def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
     """
     Extract full content and metadata from an RSS feed with retry mechanism
+    and specialized handling for problematic feeds
 
     Args:
         feed_url: URL of the RSS feed to extract content from
@@ -361,250 +395,276 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
     connection_errors = 0
     timeout_errors = 0
 
+    # Get domain from feed URL for special handling
+    domain = urlparse(feed_url).netloc
+
+    # Identify if this is a problematic feed that needs special handling
+    special_handling = next(
+        (config for site, config in PROBLEMATIC_FEEDS.items() if site in domain),
+        {'method': 'standard', 'parser': 'xml'}
+    )
+
+    logger.info(
+        f"Feed {feed_url} identified as {special_handling['method']} method")
+
     while retries < MAX_RETRIES:
         try:
             # Calculate timeout with exponential backoff
             current_timeout = INITIAL_TIMEOUT * \
                 (TIMEOUT_BACKOFF_FACTOR ** retries)
 
-            # Select random user agent and referrer for each attempt
-            user_agent = random.choice(USER_AGENTS)
-            referrer = random.choice(REFERRERS)
+            # Get special headers if needed for this domain
+            domain_headers = next(
+                (headers for site, headers in SPECIAL_HEADERS.items() if site in domain),
+                None
+            )
+
+            # Select user agent based on special handling method
+            user_agent = None
+            if special_handling['method'] == 'desktop_agent':
+                # Use desktop browser user agent for sites that block mobile
+                user_agent = USER_AGENTS[-1]  # Use desktop user agent
+            else:
+                user_agent = random.choice(USER_AGENTS)
 
             # Prepare headers
             headers = {
                 'User-Agent': user_agent,
-                'Referer': referrer,
+                'Referer': random.choice(REFERRERS),
                 **ADDITIONAL_HEADERS
             }
+
+            # Override with domain-specific headers if available
+            if domain_headers:
+                headers.update(domain_headers)
 
             logger.info(
                 f"Extracting content from RSS feed: {feed_url} (Attempt {retries + 1}/{MAX_RETRIES}, timeout={current_timeout:.1f}s)")
 
-            # Try using requests first for custom headers
-            try:
-                response = requests.get(
-                    feed_url, headers=headers, timeout=current_timeout)
-                if response.status_code == 200:
-                    feed = feedparser.parse(response.content)
-                else:
-                    logger.warning(
-                        f"HTTP error {response.status_code} for {feed_url}")
-                    # Fall back to feedparser's built-in fetching with a timeout
-                    feed = feedparser.parse(feed_url)
-            except requests.Timeout as e:
-                logger.warning(f"Timeout error for {feed_url}: {e}")
-                timeout_errors += 1
-                retries += 1
+            feed = None
 
-                # For timeout errors, we might need a longer delay
-                sleep_time = RETRY_DELAY * (retries + timeout_errors)
-                logger.info(
-                    f"Timeout occurred, retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                continue
-
-            except (requests.ConnectionError, requests.TooManyRedirects) as e:
-                logger.warning(f"Connection error for {feed_url}: {e}")
-                connection_errors += 1
-
-                # For connection errors, try with feedparser's built-in fetching
+            # Handle different methods based on the special handling type
+            if special_handling['method'] == 'direct_parse':
+                # For feeds that need direct XML parsing
                 try:
-                    logger.info(f"Falling back to feedparser for {feed_url}")
-                    feed = feedparser.parse(feed_url)
-                except Exception as inner_e:
-                    logger.error(
-                        f"Feedparser fallback also failed for {feed_url}: {inner_e}")
-                    retries += 1
-                    sleep_time = RETRY_DELAY * (retries + connection_errors)
-                    logger.info(f"Retrying in {sleep_time} seconds...")
-                    time.sleep(sleep_time)
-                    continue
-            except requests.RequestException as e:
-                logger.warning(f"Request error for {feed_url}: {e}")
-                # If requests fails, fall back to feedparser's built-in fetching
+                    response = requests.get(
+                        feed_url, headers=headers, timeout=current_timeout)
+                    if response.status_code == 200:
+                        # Try to parse directly with feedparser first
+                        feed = feedparser.parse(response.content)
+
+                        # Check if we got valid feed data
+                        if hasattr(feed, 'entries') and feed.entries:
+                            logger.info(
+                                f"Successfully parsed feed with feedparser: {feed_url}")
+                        else:
+                            # If feedparser doesn't work, try BeautifulSoup with XML parser
+                            soup = BeautifulSoup(
+                                response.text, special_handling['parser'])
+                            items = soup.find_all(['item', 'entry'])
+
+                            if items:
+                                logger.info(
+                                    f"Falling back to BeautifulSoup XML parsing for {feed_url}")
+                                articles = _extract_articles_from_soup(
+                                    soup, items)
+                                if articles:
+                                    return articles
+                    else:
+                        logger.warning(
+                            f"HTTP error {response.status_code} for {feed_url}")
+                except Exception as e:
+                    logger.warning(f"Error during direct parsing: {e}")
+
+            elif special_handling['method'] == 'feedburner_fix':
+                # Special handling for FeedBurner feeds
                 try:
-                    feed = feedparser.parse(feed_url)
-                except Exception as inner_e:
-                    logger.error(
-                        f"Feedparser fallback also failed for {feed_url}: {inner_e}")
-                    retries += 1
-                    time.sleep(RETRY_DELAY * (retries + 1))
-                    continue
-
-            # Check for feed parsing errors
-            if hasattr(feed, 'status') and feed.status >= 400:
-                logger.error(
-                    f"Error fetching feed {feed_url}: HTTP {feed.status}")
-                retries += 1
-                time.sleep(RETRY_DELAY * (retries + 1))  # Exponential backoff
-                continue
-
-            if feed.get('bozo', 0) == 1 and hasattr(feed, 'bozo_exception'):
-                # This is a feedparser error indicator
-                logger.warning(
-                    f"Feed parsing warning for {feed_url}: {feed.bozo_exception}")
-                # Continue anyway as feedparser often returns partial results
-
-            if not feed or not hasattr(feed, 'entries') or not feed.entries:
-                logger.warning(f"No entries found in feed: {feed_url}")
-                # Try an alternative parsing approach
-                try:
-                    # Use different headers for the retry
-                    alt_user_agent = random.choice(USER_AGENTS)
-                    alt_headers = {'User-Agent': alt_user_agent}
+                    # Add specific headers for FeedBurner
+                    feedburner_headers = headers.copy()
+                    feedburner_headers['Accept'] = 'application/rss+xml, application/rdf+xml, application/atom+xml, application/xml, text/xml'
 
                     response = requests.get(
-                        feed_url, headers=alt_headers, timeout=15)
-                    if response and response.status_code == 200:
-                        # Try parsing as XML
+                        feed_url, headers=feedburner_headers, timeout=current_timeout)
+
+                    if response.status_code == 200:
+                        # Try both XML and regular parsing
                         soup = BeautifulSoup(response.text, 'xml')
                         items = soup.find_all(['item', 'entry'])
 
                         if items:
                             logger.info(
-                                f"Found {len(items)} items using XML parsing")
-                            for item in items:
-                                article = {}
-
-                                # Extract title
-                                title_tag = item.find('title')
-                                article['title'] = title_tag.text if title_tag else ''
-
-                                # Extract link
-                                link_tag = item.find('link')
-                                if link_tag and link_tag.string:
-                                    article['link'] = link_tag.string.strip()
-                                elif link_tag and link_tag.get('href'):
-                                    article['link'] = link_tag.get(
-                                        'href').strip()
-                                elif item.find('guid') and item.find('guid').string and item.find('guid').string.startswith('http'):
-                                    article['link'] = item.find(
-                                        'guid').string.strip()
-                                else:
-                                    article['link'] = ''
-
-                                # Normalize the URL
-                                if article['link']:
-                                    article['link'] = normalize_url(
-                                        article['link'])
-
-                                # Skip if no link
-                                if not article['link']:
-                                    continue
-
-                                # Extract date
-                                date_tag = item.find(
-                                    ['pubDate', 'published', 'date', 'dc:date', 'updated'])
-                                article['pubDate'] = date_tag.text if date_tag else ''
-
-                                # Extract description
-                                desc_tag = item.find(
-                                    ['description', 'summary', 'content', 'content:encoded'])
-                                article['description'] = desc_tag.text if desc_tag else ''
-
-                                # Extract language
-                                lang_tag = item.find(['language', 'xml:lang'])
-                                article['language'] = lang_tag.text if lang_tag else ''
-
-                                # Extract author
-                                author_tag = item.find(
-                                    ['author', 'dc:creator'])
-                                article['author'] = author_tag.text if author_tag else ''
-
-                                articles.append(article)
-
+                                f"Using XML parser for FeedBurner feed: {feed_url}")
+                            articles = _extract_articles_from_soup(soup, items)
                             if articles:
-                                logger.info(
-                                    f"Successfully processed {len(articles)} articles from feed {feed_url} using XML fallback")
                                 return articles
-                except Exception as e:
-                    logger.error(
-                        f"Error in XML fallback parsing for {feed_url}: {e}")
 
-                # If we've tried everything and still no entries
-                retries += 1
-                time.sleep(RETRY_DELAY * (retries + 1))  # Exponential backoff
-                continue
-
-            logger.info(
-                f"Found {len(feed.entries)} entries in feed: {feed_url}")
-
-            # Debug the structure of the first entry if available
-            if len(feed.entries) > 0:
-                first_entry = feed.entries[0]
-                logger.debug(f"Sample entry keys: {list(first_entry.keys())}")
-
-            # Process each entry in the feed
-            for entry in feed.entries:
-                article = {}
-
-                # Extract basic metadata
-                article['title'] = entry.get('title', '')
-
-                # Extract link - handle various ways links can be provided
-                article['link'] = entry.get('link', '')
-                if not article['link'] and 'guid' in entry and isinstance(entry.guid, str) and entry.guid.startswith('http'):
-                    article['link'] = entry.guid
-
-                # Normalize the URL
-                if article['link']:
-                    article['link'] = normalize_url(article['link'])
-
-                # Skip entries without a link
-                if not article['link']:
-                    continue
-
-                # Extract date information
-                article['pubDate'] = entry.get('published', '')
-                if not article['pubDate']:
-                    article['pubDate'] = entry.get('pubdate', '')
-                if not article['pubDate']:
-                    article['pubDate'] = entry.get('updated', '')
-
-                # Extract language information
-                if 'language' in feed:
-                    article['language'] = feed.language
-                else:
-                    article['language'] = ''
-
-                # Extract description/summary
-                if 'summary' in entry:
-                    article['description'] = entry.summary
-                elif 'description' in entry:
-                    article['description'] = entry.description
-                else:
-                    article['description'] = ''
-
-                # Extract author information
-                if 'author' in entry:
-                    article['author'] = entry.author
-                elif 'authors' in entry and isinstance(entry.authors, list):
-                    article['author'] = ', '.join(
-                        [getattr(author, 'name', '') for author in entry.authors])
-                else:
-                    article['author'] = ''
-
-                # Extract content
-                if 'content' in entry:
-                    # Some feeds provide full content
-                    if isinstance(entry.content, list) and len(entry.content) > 0:
-                        if hasattr(entry.content[0], 'value'):
-                            article['content'] = entry.content[0].value
-                        else:
-                            article['content'] = str(entry.content[0])
+                        # If XML parsing doesn't yield results, try feedparser
+                        feed = feedparser.parse(response.content)
                     else:
-                        article['content'] = str(entry.content)
-                else:
-                    # Use description as fallback
-                    article['content'] = article['description']
+                        logger.warning(
+                            f"HTTP error {response.status_code} for {feed_url}")
+                except Exception as e:
+                    logger.warning(f"Error during FeedBurner parsing: {e}")
 
-                articles.append(article)
+            # If we haven't returned articles yet, try standard method
+            if not feed:
+                try:
+                    # Try using requests with chosen headers
+                    response = requests.get(
+                        feed_url, headers=headers, timeout=current_timeout)
 
-            logger.info(
-                f"Successfully processed {len(articles)} articles from feed {feed_url}")
-            # If we got here, we succeeded
-            return articles
+                    if response.status_code == 200:
+                        # Try each parser in sequence
+                        for parser in FEED_PARSERS:
+                            try:
+                                if parser == 'xml':
+                                    # First try feedparser
+                                    feed = feedparser.parse(response.content)
+
+                                    # If we have entries, break the loop
+                                    if hasattr(feed, 'entries') and feed.entries:
+                                        break
+
+                                # If feedparser doesn't work or we're trying alternative parsers
+                                soup = BeautifulSoup(response.text, parser)
+                                items = soup.find_all(['item', 'entry'])
+
+                                if items:
+                                    logger.info(
+                                        f"Using {parser} parser for feed: {feed_url}")
+                                    extracted = _extract_articles_from_soup(
+                                        soup, items)
+                                    if extracted:
+                                        return extracted
+                            except Exception as parser_e:
+                                logger.debug(
+                                    f"Parser {parser} failed: {parser_e}")
+                                continue
+                    else:
+                        logger.warning(
+                            f"HTTP error {response.status_code} for {feed_url}")
+                except requests.Timeout as e:
+                    logger.warning(f"Timeout error for {feed_url}: {e}")
+                    timeout_errors += 1
+                    retries += 1
+
+                    # For timeout errors, we might need a longer delay
+                    sleep_time = RETRY_DELAY * (retries + timeout_errors)
+                    logger.info(
+                        f"Timeout occurred, retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                    continue
+                except Exception as e:
+                    logger.warning(f"Request error for {feed_url}: {e}")
+
+                    # If requests fails, fall back to feedparser's built-in fetching
+                    try:
+                        feed = feedparser.parse(feed_url)
+                    except Exception as inner_e:
+                        logger.error(
+                            f"Feedparser fallback also failed for {feed_url}: {inner_e}")
+                        retries += 1
+                        time.sleep(RETRY_DELAY * (retries + 1))
+                        continue
+
+            # Process feedparser results if we have them
+            if feed and hasattr(feed, 'entries') and feed.entries:
+                logger.info(
+                    f"Found {len(feed.entries)} entries in feed: {feed_url}")
+
+                # Process each entry in the feed
+                for entry in feed.entries:
+                    article = {}
+
+                    # Extract basic metadata
+                    article['title'] = entry.get('title', '')
+
+                    # Extract link - handle various ways links can be provided
+                    article['link'] = entry.get('link', '')
+                    if not article['link'] and 'guid' in entry and isinstance(entry.guid, str) and entry.guid.startswith('http'):
+                        article['link'] = entry.guid
+
+                    # Normalize the URL
+                    if article['link']:
+                        article['link'] = normalize_url(article['link'])
+
+                    # Skip entries without a link
+                    if not article['link']:
+                        continue
+
+                    # Extract date information
+                    article['pubDate'] = entry.get('published', '')
+                    if not article['pubDate']:
+                        article['pubDate'] = entry.get('pubdate', '')
+                    if not article['pubDate']:
+                        article['pubDate'] = entry.get('updated', '')
+
+                    # Extract language information
+                    if 'language' in feed:
+                        article['language'] = feed.language
+                    else:
+                        article['language'] = ''
+
+                    # Extract description/summary
+                    if 'summary' in entry:
+                        article['description'] = entry.summary
+                    elif 'description' in entry:
+                        article['description'] = entry.description
+                    else:
+                        article['description'] = ''
+
+                    # Extract author information
+                    if 'author' in entry:
+                        article['author'] = entry.author
+                    elif 'authors' in entry and isinstance(entry.authors, list):
+                        article['author'] = ', '.join(
+                            [getattr(author, 'name', '') for author in entry.authors])
+                    else:
+                        article['author'] = ''
+
+                    # Extract content
+                    if 'content' in entry:
+                        # Some feeds provide full content
+                        if isinstance(entry.content, list) and len(entry.content) > 0:
+                            if hasattr(entry.content[0], 'value'):
+                                article['content'] = entry.content[0].value
+                            else:
+                                article['content'] = str(entry.content[0])
+                        else:
+                            article['content'] = str(entry.content)
+                    else:
+                        # Use description as fallback
+                        article['content'] = article['description']
+
+                    articles.append(article)
+
+                # If we found at least one article, return the results
+                if articles:
+                    logger.info(
+                        f"Successfully processed {len(articles)} articles from feed {feed_url}")
+                    return articles
+
+            # If we got here without returning articles, retry with a different approach
+            logger.warning(
+                f"Standard methods failed for {feed_url}, trying alternative approach")
+
+            # Try to scrape with full web browser simulation for very problematic feeds
+            if retries >= 2:  # Only try this approach after standard methods have failed twice
+                try:
+                    # Try to use a more powerful scraping method
+                    result = _try_extract_with_raw_http(feed_url)
+                    if result and len(result) > 0:
+                        logger.info(
+                            f"Successfully extracted {len(result)} articles with raw HTTP method")
+                        return result
+                except Exception as e:
+                    logger.error(f"Alternative extraction method failed: {e}")
+
+            retries += 1
+            if retries < MAX_RETRIES:
+                logger.info(
+                    f"Retrying in {RETRY_DELAY * (retries + 1)} seconds... (Attempt {retries+1}/{MAX_RETRIES})")
+                time.sleep(RETRY_DELAY * (retries + 1))  # Exponential backoff
 
         except Exception as e:
             logger.error(f"Error extracting content from feed {feed_url}: {e}")
@@ -616,6 +676,181 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
             else:
                 logger.error(
                     f"Failed to extract content from {feed_url} after {MAX_RETRIES} attempts")
-                break
+
+    # Log empty article info as this is our most common failure
+    if not articles:
+        logger.error(
+            f"No articles extracted from {feed_url} after {MAX_RETRIES} attempts")
+        _log_failed_feed(feed_url, "No articles extracted")
 
     return articles
+
+
+def _extract_articles_from_soup(soup, items):
+    """Helper function to extract articles from soup items"""
+    articles = []
+
+    for item in items:
+        article = {}
+
+        # Extract title
+        title_tag = item.find('title')
+        article['title'] = title_tag.text if title_tag else ''
+
+        # Extract link
+        link_tag = item.find('link')
+        if link_tag and link_tag.string:
+            article['link'] = link_tag.string.strip()
+        elif link_tag and link_tag.get('href'):
+            article['link'] = link_tag.get('href').strip()
+        elif item.find('guid') and item.find('guid').string and item.find('guid').string.startswith('http'):
+            article['link'] = item.find('guid').string.strip()
+        else:
+            article['link'] = ''
+
+        # Normalize the URL
+        if article['link']:
+            article['link'] = normalize_url(article['link'])
+
+        # Skip if no link
+        if not article['link']:
+            continue
+
+        # Extract date
+        date_tag = item.find(
+            ['pubDate', 'published', 'date', 'dc:date', 'updated'])
+        article['pubDate'] = date_tag.text if date_tag else ''
+
+        # Extract description
+        desc_tag = item.find(
+            ['description', 'summary', 'content', 'content:encoded'])
+        article['description'] = desc_tag.text if desc_tag else ''
+
+        # Extract language
+        lang_tag = item.find(['language', 'xml:lang'])
+        article['language'] = lang_tag.text if lang_tag else ''
+
+        # Extract author
+        author_tag = item.find(['author', 'dc:creator'])
+        article['author'] = author_tag.text if author_tag else ''
+
+        articles.append(article)
+
+    return articles
+
+
+def _try_extract_with_raw_http(feed_url):
+    """Last resort method to extract feed content with custom HTTP request handling"""
+    articles = []
+
+    try:
+        # Create a completely clean session
+        session = requests.Session()
+
+        # Use a desktop user agent
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Referer': 'https://www.google.com/',
+            'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="123", "Chromium";v="123"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'Upgrade-Insecure-Requests': '1'
+        }
+
+        # Try to get the feed with extended timeout
+        response = session.get(feed_url, headers=headers, timeout=30)
+
+        if response.status_code == 200:
+            content_type = response.headers.get('Content-Type', '').lower()
+
+            # Determine if this is JSON or XML
+            if 'json' in content_type:
+                # Parse as JSON
+                try:
+                    data = json.loads(response.text)
+                    # Extract articles based on common JSON feed structures
+                    if 'items' in data:
+                        json_items = data['items']
+                    elif 'entries' in data:
+                        json_items = data['entries']
+                    else:
+                        json_items = []
+
+                    for item in json_items:
+                        article = {}
+                        article['title'] = item.get('title', '')
+                        article['link'] = item.get('url', item.get('link', ''))
+                        article['pubDate'] = item.get(
+                            'date', item.get('published', ''))
+                        article['description'] = item.get(
+                            'description', item.get('summary', ''))
+                        article['author'] = item.get('author', '')
+
+                        if article['link']:
+                            articles.append(article)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON from {feed_url}")
+            else:
+                # Try all parsers for XML/HTML content
+                for parser in ['xml', 'html.parser', 'lxml', 'html5lib']:
+                    try:
+                        soup = BeautifulSoup(response.text, parser)
+
+                        # Look for RSS/Atom items
+                        items = soup.find_all(['item', 'entry'])
+
+                        if items:
+                            extracted = _extract_articles_from_soup(
+                                soup, items)
+                            if extracted:
+                                articles.extend(extracted)
+                                break
+                    except Exception:
+                        continue
+
+        # Return any articles we found
+        return articles
+
+    except Exception as e:
+        logger.error(f"Raw HTTP extraction failed: {e}")
+        return []
+
+
+def _log_failed_feed(feed_url, error_message):
+    """Log failed feeds to a JSON file for tracking"""
+    failed_file = "failed_feeds.json"
+
+    try:
+        # Try to read existing file
+        try:
+            with open(failed_file, 'r') as f:
+                failed_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Create new structure if file doesn't exist or is invalid
+            failed_data = {
+                "total_failed_feeds": 0,
+                "export_timestamp": str(time.localtime()),
+                "feeds": {}
+            }
+
+        # Update the data
+        feed_entry = {
+            "error": error_message,
+            "timestamp": str(time.strftime("%Y-%m-%d %H:%M:%S.%f", time.localtime()))
+        }
+
+        failed_data["feeds"][feed_url] = feed_entry
+        failed_data["total_failed_feeds"] = len(failed_data["feeds"])
+        failed_data["export_timestamp"] = str(time.localtime())
+
+        # Write back to file
+        with open(failed_file, 'w') as f:
+            json.dump(failed_data, f, indent=2)
+
+        logger.info(f"Logged failed feed {feed_url} to {failed_file}")
+    except Exception as e:
+        logger.error(f"Error logging failed feed: {e}")

@@ -41,13 +41,31 @@ def process_article_content(article: Dict, scraper, db_client) -> bool:
     try:
         article_id = article['id']
         article_url = article['url']
+        original_domain = article['domain']
 
         # Extract article content
         content_data = scraper.extract_article_content(article_url)
 
         if content_data and content_data.get('content'):
-            # Update article with content
-            return db_client.update_article_content(article_id, content_data['content'])
+            # Check if we have final_domain information from a redirect
+            final_domain = content_data.get('final_domain')
+
+            # Update the domain in the database if this was redirected
+            # (especially for news.google.com and other redirect services)
+            if final_domain and final_domain != original_domain:
+                logger.info(
+                    f"Domain updated for article {article_id}: {original_domain} -> {final_domain}")
+
+                # Update article with content and the new domain
+                return db_client.update_article_content(
+                    article_id,
+                    content_data['content'],
+                    error_message=None,
+                    domain=final_domain
+                )
+            else:
+                # Update article with content only
+                return db_client.update_article_content(article_id, content_data['content'])
         else:
             # Update article with error message
             error_msg = "Failed to extract content: Content extraction returned empty result"
