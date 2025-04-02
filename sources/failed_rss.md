@@ -1,0 +1,14 @@
+https://www.latimes.com/opinion/rss2.0.xml
+https://www.economist.com/finance-and-economics/rss.xml
+https://www.usnews.com/rss/the-report
+https://www.theatlantic.com/feed/channel/business/
+https://www.theatlantic.com/feed/channel/international/
+https://www.globaltimes.cn/rss/outbrain.xml
+https://rsshub.app/apnews/topics/apf-topnews
+https://www.theguardian.com/us/business/rss
+https://www.telegraph.co.uk/politics/rss.xml
+https://asia.nikkei.com/rss/feed/nar
+https://feeds.content.dowjones.io/public/rss/mw_marketpulse
+http://feeds.marketwatch.com/marketwatch/realtimeheadlines
+https://www.businesstimes.com.sg/rss/government-economy
+https://feeds.feedburner.com/ndtvprofit-latest

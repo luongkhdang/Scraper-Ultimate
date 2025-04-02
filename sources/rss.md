@@ -1,4 +1,3 @@
-https://biztoc.com/feed
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
 https://thehill.com/policy/feed/
 https://thehill.com/business/feed/
@@ -17,8 +16,6 @@ https://www.latimes.com/business/rss2.0.xml
 https://www.latimes.com/opinion/rss2.0.xml
 https://feeds.businessinsider.com/custom/all
 https://markets.businessinsider.com/rss/news
-https://chaski.huffpost.com/us/auto/vertical/us-news
-https://chaski.huffpost.com/us/auto/vertical/world-news
 https://www.economist.com/finance-and-economics/rss.xml
 https://www.economist.com/asia/rss.xml
 https://www.economist.com/china/rss.xml
@@ -27,7 +24,6 @@ https://www.economist.com/international/rss.xml
 https://www.economist.com/finance-and-economics/rss.xml
 https://www.economist.com/business/rss.xml
 http://feeds.feedburner.com/DrudgeReportFeed
-https://www.usnews.com/rss/money
 https://www.usnews.com/rss/news
 https://www.usnews.com/rss/the-report
 https://www.theatlantic.com/feed/channel/politics/
@@ -51,7 +47,6 @@ https://feeds.washingtonpost.com/rss/rss_the-fix
 https://feeds.washingtonpost.com/rss/rss_rampage
 https://feeds.washingtonpost.com/rss/world
 https://feeds.washingtonpost.com/rss/national
-https://fortune.com/feed
 https://www.theguardian.com/business/economics/rss
 https://www.theguardian.com/us-news/us-politics/rss
 https://www.theguardian.com/us/business/rss
@@ -96,3 +91,4 @@ https://feeds.feedburner.com/ndtvprofit-latest
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=economy
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=vietnam
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=tax
+https://biztoc.com/feed

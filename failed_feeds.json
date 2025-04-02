@@ -1,10 +1,62 @@
 {
-  "total_failed_feeds": 1,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=2, tm_hour=7, tm_min=56, tm_sec=48, tm_wday=2, tm_yday=92, tm_isdst=0)",
+  "total_failed_feeds": 14,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=2, tm_hour=16, tm_min=5, tm_sec=52, tm_wday=2, tm_yday=92, tm_isdst=0)",
   "feeds": {
-    "https://biztoc.com/feed": {
+    "https://www.latimes.com/opinion/rss2.0.xml": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-02 07:56:48.970233"
+      "timestamp": "2025-04-02 15:01:44.902910"
+    },
+    "https://www.economist.com/finance-and-economics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:01:46.383297"
+    },
+    "https://www.usnews.com/rss/the-report": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866556"
+    },
+    "https://www.theatlantic.com/feed/channel/business/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866568"
+    },
+    "https://www.theatlantic.com/feed/channel/international/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866571"
+    },
+    "https://www.globaltimes.cn/rss/outbrain.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866575"
+    },
+    "https://rsshub.app/apnews/topics/apf-topnews": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866589"
+    },
+    "https://www.theguardian.com/us/business/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866605"
+    },
+    "https://www.telegraph.co.uk/politics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866610"
+    },
+    "https://asia.nikkei.com/rss/feed/nar": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866665"
+    },
+    "https://feeds.content.dowjones.io/public/rss/mw_marketpulse": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866674"
+    },
+    "http://feeds.marketwatch.com/marketwatch/realtimeheadlines": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866677"
+    },
+    "https://www.businesstimes.com.sg/rss/government-economy": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866686"
+    },
+    "https://feeds.feedburner.com/ndtvprofit-latest": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-02 15:04:26.866693"
     }
   }
 }
