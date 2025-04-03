@@ -129,7 +129,7 @@ The application can be configured using environment variables:
 - `DB_HOST`: Database host (default: localhost)
 - `DB_PORT`: Database port (default: 5432)
 - `MAX_ARTICLES_PER_WEBSITE`: Maximum number of articles to scrape per website (default: 5)
-- `PARALLEL_WORKERS`: Number of parallel workers (default: 3)
+- `PARALLEL_WORKERS`: Number of parallel workers (default: 30)
 - `USE_PROXIES`: Whether to use proxy rotation (default: true)
 
 ## Proxy Rotation

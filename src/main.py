@@ -45,7 +45,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Scraper configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '30'))
 PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '250'))
 
 
@@ -158,10 +158,10 @@ def main():
             return
 
         # Create two separate thread pools: one for RSS feeds, one for pending articles
-        # Use half the workers for RSS feeds, minimum 3
-        rss_workers = max(PARALLEL_WORKERS // 2, 3)
-        # Use half the workers for articles, minimum 3
-        article_workers = max(PARALLEL_WORKERS // 2, 3)
+        # Allocate 40% of workers for RSS feeds, minimum 5
+        rss_workers = max(int(PARALLEL_WORKERS * 0.4), 5)
+        # Allocate 60% of workers for articles, minimum 5
+        article_workers = max(int(PARALLEL_WORKERS * 0.6), 5)
 
         logger.info(
             f"Creating thread pools with {rss_workers} RSS workers and {article_workers} article workers")
@@ -256,7 +256,7 @@ def main():
         logger.info(
             "========== STARTING STEP 4: RETRYING FAILED ARTICLES ==========")
         logger.info(
-            "Retrying articles with 'FAILED' status using 5 parallel workers...")
+            f"Retrying articles with 'FAILED' status using up to {min(15, PARALLEL_WORKERS)} parallel workers...")
 
         # Get failed articles from the database
         failed_articles = db_client.get_failed_articles()
@@ -265,9 +265,9 @@ def main():
             failed_count = len(failed_articles)
             logger.info(f"Found {failed_count} failed articles to retry")
 
-            # Use a smaller number of workers for retries to be more careful
-            # Maximum 5 workers for retries
-            retry_workers = min(5, PARALLEL_WORKERS)
+            # Use a reasonable number of workers for retries
+            # Maximum 15 workers for retries, which is half of our total PARALLEL_WORKERS
+            retry_workers = min(15, PARALLEL_WORKERS // 2)
 
             # Extract URLs from failed articles
             failed_urls = [article['url'] for article in failed_articles]
@@ -304,6 +304,43 @@ def main():
 
         logger.info(
             "========== COMPLETED STEP 4: RETRYING FAILED ARTICLES ==========")
+
+        # Check for remaining pending articles and process them until none remain
+        logger.info(
+            "========== FINAL CHECK: ENSURING NO PENDING ARTICLES REMAIN ==========")
+
+        pending_count = db_client.get_pending_articles_count()
+        while pending_count > 0:
+            logger.info(
+                f"Found {pending_count} remaining pending articles. Processing them now...")
+
+            # Process in reasonable batches
+            remaining_processed = process_pending_articles(
+                scraper, db_client, PENDING_BATCH_SIZE)
+            logger.info(
+                f"Processed {remaining_processed} remaining pending articles")
+
+            # Check if we still have pending articles
+            pending_count = db_client.get_pending_articles_count()
+
+            # Small delay to prevent tight loops
+            if pending_count > 0:
+                logger.info(
+                    f"Still have {pending_count} pending articles. Continuing processing...")
+                time.sleep(2)
+
+        logger.info(
+            "No pending articles remain in the database. Proceeding to export reports.")
+        logger.info("========== COMPLETED FINAL CHECK ==========")
+
+        # Clean up the database before generating reports
+        logger.info("========== STARTING DATABASE CLEANUP ==========")
+        logger.info(
+            "Removing duplicate content and failed articles from the database...")
+        deleted_count = db_client.clean_up_database()
+        logger.info(
+            f"Database cleanup complete: {deleted_count} articles removed")
+        logger.info("========== COMPLETED DATABASE CLEANUP ==========")
 
         # Export failed RSS feeds
         if failed_feeds:

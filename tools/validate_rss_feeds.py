@@ -28,13 +28,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger('rss_validator')
 
-# Custom user agent to avoid being blocked
+# Configuration
+MAX_RETRIES = 3
+REQUEST_TIMEOUT = 30
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 HEADERS = {'User-Agent': USER_AGENT}
-
-# Constants
-TIMEOUT = 10  # Seconds
-MAX_WORKERS = 10
+TIMEOUT = REQUEST_TIMEOUT
+MAX_WORKERS = 30
 
 
 def read_rss_feeds(file_path: str) -> List[str]:

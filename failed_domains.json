@@ -1,177 +1,89 @@
 {
-  "total_failed_domains": 11,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=2, tm_hour=21, tm_min=30, tm_sec=52, tm_wday=2, tm_yday=92, tm_isdst=0)",
+  "total_failed_domains": 7,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=3, tm_hour=3, tm_min=55, tm_sec=39, tm_wday=3, tm_yday=93, tm_isdst=0)",
   "domains": {
-    "news.google.com": {
-      "failed_count": 192,
+    "biztoc.com": {
+      "failed_count": 27,
       "error_messages": [
         "Failed to extract content: Content extraction returned empty result"
       ],
       "article_ids": [
-        12872,
-        11304,
-        11302,
-        12773,
-        12756,
-        12785,
-        12752,
-        12783,
-        12755,
-        12789
+        18369,
+        18370,
+        18372,
+        18585,
+        18352,
+        18359,
+        18347,
+        18349,
+        18355,
+        18356
+      ]
+    },
+    "news.google.com": {
+      "failed_count": 14,
+      "error_messages": [
+        "Failed to extract content: Content extraction returned empty result"
+      ],
+      "article_ids": [
+        18553,
+        18535,
+        18532,
+        18336,
+        18331,
+        18335,
+        18326,
+        18325,
+        18534,
+        18339
       ]
     },
     "www.wsj.com": {
-      "failed_count": 104,
+      "failed_count": 4,
       "error_messages": [
         "Failed to extract content: Content extraction returned empty result"
       ],
       "article_ids": [
-        12321,
-        12322,
-        12318,
-        12317,
-        12313,
-        12040,
-        12320,
-        12036,
-        12045,
-        12041
+        18523,
+        18502,
+        18522,
+        18524
       ]
     },
-    "biztoc.com": {
-      "failed_count": 46,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        12127,
-        12112,
-        12092,
-        12111,
-        12094,
-        12107,
-        12104,
-        13083,
-        13052,
-        13152
-      ]
-    },
-    "nypost.com": {
-      "failed_count": 45,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        12622,
-        12629,
-        12628,
-        12635,
-        12631,
-        12630,
-        12637,
-        12624,
-        12627,
-        12632
-      ]
-    },
-    "www.blogger.com": {
-      "failed_count": 10,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        12522,
-        12524,
-        12519,
-        12527,
-        12526,
-        12523,
-        12525,
-        12521,
-        12528,
-        12520
-      ]
-    },
-    "www.investing.com": {
-      "failed_count": 10,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        12477,
-        12476,
-        12474,
-        12481,
-        12475,
-        12478,
-        12480,
-        12479,
-        12482,
-        12483
-      ]
-    },
-    "www.marketwatch.com": {
-      "failed_count": 10,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        12367,
-        12374,
-        12375,
-        12373,
-        12376,
-        12368,
-        12372,
-        12370,
-        12371,
-        12369
-      ]
-    },
-    "www.barrons.com": {
-      "failed_count": 8,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        11806,
-        11812,
-        11815,
-        11827,
-        11814,
-        11835,
-        11821,
-        11825
-      ]
-    },
-    "apnews.com": {
-      "failed_count": 3,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        14161,
-        14157,
-        14149
-      ]
-    },
-    "www.economist.com": {
-      "failed_count": 2,
-      "error_messages": [
-        "Failed to extract content: Content extraction returned empty result"
-      ],
-      "article_ids": [
-        11714,
-        11715
-      ]
-    },
-    "www.politico.com": {
+    "www.investors.com": {
       "failed_count": 1,
       "error_messages": [
         "Failed to extract content: Content extraction returned empty result"
       ],
       "article_ids": [
-        11588
+        18507
+      ]
+    },
+    "thehill.com": {
+      "failed_count": 1,
+      "error_messages": [
+        "Failed to extract content: Content extraction returned empty result"
+      ],
+      "article_ids": [
+        18536
+      ]
+    },
+    "seekingalpha.com": {
+      "failed_count": 1,
+      "error_messages": [
+        "Failed to extract content: Content extraction returned empty result"
+      ],
+      "article_ids": [
+        18527
+      ]
+    },
+    "www.businessinsider.com": {
+      "failed_count": 1,
+      "error_messages": [
+        "Failed to extract content: Content extraction returned empty result"
+      ],
+      "article_ids": [
+        18574
       ]
     }
   }

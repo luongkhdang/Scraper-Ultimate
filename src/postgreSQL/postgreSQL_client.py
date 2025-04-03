@@ -42,7 +42,7 @@ DB_CONFIG = {
 }
 
 # Get PARALLEL_WORKERS from environment for connection pool sizing
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '30'))
 
 # Configure connection pool size based on parallel workers
 # We need at least as many connections as workers, plus some overhead
@@ -607,6 +607,82 @@ class PostgreSQLClient:
         except Exception as e:
             logger.error(f"Error getting article by URL {url}: {e}")
             return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                self.release_connection(conn)
+
+    def get_pending_articles_count(self) -> int:
+        """
+        Get the count of articles with 'Pending' status in the database
+
+        Returns:
+            Integer count of pending articles
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM articles
+                WHERE proceeding_status = 'Pending'
+            """)
+
+            count = cursor.fetchone()[0]
+            return count
+        except Exception as e:
+            logger.error(f"Error getting pending articles count: {e}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                self.release_connection(conn)
+
+    def clean_up_database(self) -> int:
+        """
+        Clean up the database by removing duplicate content and failed articles
+
+        Returns:
+            Number of deleted records
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Delete articles with duplicate content or failed status
+            cursor.execute("""
+                DELETE FROM articles
+                WHERE content IN (
+                    SELECT content
+                    FROM articles
+                    WHERE content IS NOT NULL
+                    GROUP BY content
+                    HAVING COUNT(*) > 1
+                )
+                OR proceeding_status = 'FAILED'
+                RETURNING id;
+            """)
+
+            # Get the number of deleted records
+            deleted_ids = cursor.fetchall()
+            deleted_count = len(deleted_ids)
+
+            conn.commit()
+            logger.info(
+                f"Cleaned up database: deleted {deleted_count} duplicate or failed articles")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error cleaning up database: {e}")
+            if conn:
+                conn.rollback()
+            return 0
         finally:
             if cursor:
                 cursor.close()
