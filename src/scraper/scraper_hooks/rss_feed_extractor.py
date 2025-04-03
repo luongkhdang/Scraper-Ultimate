@@ -32,31 +32,40 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Constants for retry settings
-MAX_RETRIES = 5  # Increased from 3 to 5
+MAX_RETRIES = 8  # Increased from 5 to 8
 RETRY_DELAY = 2
 INITIAL_TIMEOUT = 15  # Base timeout in seconds
-TIMEOUT_BACKOFF_FACTOR = 1.5  # Increase timeout for each retry
+TIMEOUT_BACKOFF_FACTOR = 1.2  # Less aggressive backoff
+MAX_DELAY = 40  # Cap maximum delay to avoid excessive waiting
 
-# Rotating user agents (similar to puppeteer.ts)
+# Expanded rotating user agents
 USER_AGENTS = [
     # iOS devices (preferred by publishers)
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/123.0.6312.87 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     # Android devices
     'Mozilla/5.0 (Linux; Android 14; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
     'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
     # Desktop browsers
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+    # News reader agents
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Feedly/1.0',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/123.0.0.0 Safari/537.36'
 ]
 
-# Rotating referrers (similar to puppeteer.ts)
+# Enhanced rotating referrers
 REFERRERS = [
     'https://www.google.com/',
+    'https://www.google.com/search?q=news',
     'https://www.bing.com/search?q=news',
     'https://www.reddit.com/r/news',
     'https://t.co/shortened_url',  # looks like twitter
     'https://www.linkedin.com/feed/',
+    'https://news.google.com/',
+    'https://feedly.com/i/latest'
 ]
 
 # Additional headers for requests (based on puppeteer.ts)
@@ -83,8 +92,8 @@ PROBLEMATIC_FEEDS = {
     'marketwatch.com': {'method': 'desktop_agent', 'parser': 'html.parser'}
 }
 
-# Parser options for different feed formats
-FEED_PARSERS = ['xml', 'html.parser', 'lxml', 'html5lib']
+# More comprehensive parser options
+FEED_PARSERS = ['xml', 'lxml', 'html.parser', 'html5lib']
 
 # Special case headers for sites that block requests
 SPECIAL_HEADERS = {
@@ -390,49 +399,71 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
 
     # Initialize retry counter
     retries = 0
+    # Add an overall timeout for the entire function
+    overall_start_time = time.time()
+    # Maximum time in seconds this function should run before giving up
+    max_overall_timeout = 60
 
     # Track the specific errors for better retry handling
     connection_errors = 0
     timeout_errors = 0
+    parse_errors = 0
+    http_errors = 0
 
     # Get domain from feed URL for special handling
     domain = urlparse(feed_url).netloc
 
+    # Track which approaches have been tried to avoid repeating failures
+    tried_approaches = set()
+
     # Identify if this is a problematic feed that needs special handling
-    special_handling = next(
-        (config for site, config in PROBLEMATIC_FEEDS.items() if site in domain),
-        {'method': 'standard', 'parser': 'xml'}
-    )
+    special_handling = None
+    for site, config in PROBLEMATIC_FEEDS.items():
+        if site in domain:
+            special_handling = config
+            break
+
+    if not special_handling:
+        special_handling = {'method': 'standard', 'parser': 'xml'}
 
     logger.info(
         f"Feed {feed_url} identified as {special_handling['method']} method")
 
     while retries < MAX_RETRIES:
         try:
-            # Calculate timeout with exponential backoff
-            current_timeout = INITIAL_TIMEOUT * \
-                (TIMEOUT_BACKOFF_FACTOR ** retries)
+            # Calculate timeout with exponential backoff, but cap at maximum
+            backoff_factor = min(TIMEOUT_BACKOFF_FACTOR **
+                                 retries, MAX_DELAY / INITIAL_TIMEOUT)
+            current_timeout = INITIAL_TIMEOUT * backoff_factor
 
             # Get special headers if needed for this domain
-            domain_headers = next(
-                (headers for site, headers in SPECIAL_HEADERS.items() if site in domain),
-                None
-            )
+            domain_headers = None
+            for site, headers in SPECIAL_HEADERS.items():
+                if site in domain:
+                    domain_headers = headers
+                    break
 
-            # Select user agent based on special handling method
+            # Select user agent based on special handling method and retry attempt
+            # Vary user agent on each retry to bypass blocks
             user_agent = None
             if special_handling['method'] == 'desktop_agent':
                 # Use desktop browser user agent for sites that block mobile
-                user_agent = USER_AGENTS[-1]  # Use desktop user agent
+                # Cycle through desktop agents
+                user_agent = USER_AGENTS[5 + (retries % 3)]
             else:
-                user_agent = random.choice(USER_AGENTS)
+                # Use a different user agent for each retry
+                user_agent = USER_AGENTS[retries % len(USER_AGENTS)]
 
             # Prepare headers
             headers = {
                 'User-Agent': user_agent,
-                'Referer': random.choice(REFERRERS),
+                # Different referrer each time
+                'Referer': REFERRERS[retries % len(REFERRERS)],
                 **ADDITIONAL_HEADERS
             }
+
+            # Add Accept header indicating we prefer RSS/XML content
+            headers['Accept'] = 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
 
             # Override with domain-specific headers if available
             if domain_headers:
@@ -441,73 +472,107 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
             logger.info(
                 f"Extracting content from RSS feed: {feed_url} (Attempt {retries + 1}/{MAX_RETRIES}, timeout={current_timeout:.1f}s)")
 
+            # Track this approach to avoid repeating the exact same approach
+            approach = f"{special_handling['method']}_{user_agent[:20]}"
+            if approach in tried_approaches:
+                # If we've tried this method before, vary the headers
+                headers['Accept-Language'] = random.choice(
+                    ['en-US,en;q=0.9', 'en-GB,en;q=0.8', 'en;q=0.7'])
+                headers['Cache-Control'] = 'no-cache'
+                approach = f"{approach}_variant"
+
+            tried_approaches.add(approach)
+
             feed = None
 
-            # Handle different methods based on the special handling type
-            if special_handling['method'] == 'direct_parse':
-                # For feeds that need direct XML parsing
-                try:
-                    response = requests.get(
-                        feed_url, headers=headers, timeout=current_timeout)
-                    if response.status_code == 200:
-                        # Try to parse directly with feedparser first
-                        feed = feedparser.parse(response.content)
+            # Try multiple approaches in sequence:
 
-                        # Check if we got valid feed data
-                        if hasattr(feed, 'entries') and feed.entries:
-                            logger.info(
-                                f"Successfully parsed feed with feedparser: {feed_url}")
+            # APPROACH 1: Direct feedparser parsing
+            if 'direct_feedparser' not in tried_approaches and retries < 2:
+                tried_approaches.add('direct_feedparser')
+                try:
+                    logger.info(f"Trying direct feedparser for {feed_url}")
+                    feed = feedparser.parse(feed_url)
+
+                    if not feed.get('bozo', 0) and hasattr(feed, 'entries') and feed.entries:
+                        logger.info(
+                            f"Direct feedparser successful for {feed_url}")
+                except Exception as e:
+                    logger.warning(f"Direct feedparser failed: {e}")
+
+            # Handle different methods based on the special handling type
+            if not (feed and hasattr(feed, 'entries') and feed.entries):
+                if special_handling['method'] == 'direct_parse':
+                    # For feeds that need direct XML parsing
+                    try:
+                        response = requests.get(
+                            feed_url, headers=headers, timeout=current_timeout)
+                        if response.status_code == 200:
+                            # Try to parse directly with feedparser first
+                            feed = feedparser.parse(response.content)
+
+                            # Check if we got valid feed data
+                            if hasattr(feed, 'entries') and feed.entries:
+                                logger.info(
+                                    f"Successfully parsed feed with feedparser: {feed_url}")
+                            else:
+                                # If feedparser doesn't work, try BeautifulSoup with XML parser
+                                soup = BeautifulSoup(
+                                    response.text, special_handling['parser'])
+                                items = soup.find_all(['item', 'entry'])
+
+                                if items:
+                                    logger.info(
+                                        f"Falling back to BeautifulSoup XML parsing for {feed_url}")
+                                    articles = _extract_articles_from_soup(
+                                        soup, items)
+                                    if articles:
+                                        return articles
                         else:
-                            # If feedparser doesn't work, try BeautifulSoup with XML parser
-                            soup = BeautifulSoup(
-                                response.text, special_handling['parser'])
+                            logger.warning(
+                                f"HTTP error {response.status_code} for {feed_url}")
+                            http_errors += 1
+                    except Exception as e:
+                        logger.warning(f"Error during direct parsing: {e}")
+                        if isinstance(e, requests.Timeout):
+                            timeout_errors += 1
+
+                elif special_handling['method'] == 'feedburner_fix':
+                    # Special handling for FeedBurner feeds
+                    try:
+                        # Add specific headers for FeedBurner
+                        feedburner_headers = headers.copy()
+                        feedburner_headers['Accept'] = 'application/rss+xml, application/rdf+xml, application/atom+xml, application/xml, text/xml'
+
+                        response = requests.get(
+                            feed_url, headers=feedburner_headers, timeout=current_timeout)
+
+                        if response.status_code == 200:
+                            # Try both XML and regular parsing
+                            soup = BeautifulSoup(response.text, 'xml')
                             items = soup.find_all(['item', 'entry'])
 
                             if items:
                                 logger.info(
-                                    f"Falling back to BeautifulSoup XML parsing for {feed_url}")
+                                    f"Using XML parser for FeedBurner feed: {feed_url}")
                                 articles = _extract_articles_from_soup(
                                     soup, items)
                                 if articles:
                                     return articles
-                    else:
-                        logger.warning(
-                            f"HTTP error {response.status_code} for {feed_url}")
-                except Exception as e:
-                    logger.warning(f"Error during direct parsing: {e}")
 
-            elif special_handling['method'] == 'feedburner_fix':
-                # Special handling for FeedBurner feeds
-                try:
-                    # Add specific headers for FeedBurner
-                    feedburner_headers = headers.copy()
-                    feedburner_headers['Accept'] = 'application/rss+xml, application/rdf+xml, application/atom+xml, application/xml, text/xml'
-
-                    response = requests.get(
-                        feed_url, headers=feedburner_headers, timeout=current_timeout)
-
-                    if response.status_code == 200:
-                        # Try both XML and regular parsing
-                        soup = BeautifulSoup(response.text, 'xml')
-                        items = soup.find_all(['item', 'entry'])
-
-                        if items:
-                            logger.info(
-                                f"Using XML parser for FeedBurner feed: {feed_url}")
-                            articles = _extract_articles_from_soup(soup, items)
-                            if articles:
-                                return articles
-
-                        # If XML parsing doesn't yield results, try feedparser
-                        feed = feedparser.parse(response.content)
-                    else:
-                        logger.warning(
-                            f"HTTP error {response.status_code} for {feed_url}")
-                except Exception as e:
-                    logger.warning(f"Error during FeedBurner parsing: {e}")
+                            # If XML parsing doesn't yield results, try feedparser
+                            feed = feedparser.parse(response.content)
+                        else:
+                            logger.warning(
+                                f"HTTP error {response.status_code} for {feed_url}")
+                            http_errors += 1
+                    except Exception as e:
+                        logger.warning(f"Error during FeedBurner parsing: {e}")
+                        if isinstance(e, requests.Timeout):
+                            timeout_errors += 1
 
             # If we haven't returned articles yet, try standard method
-            if not feed:
+            if not (feed and hasattr(feed, 'entries') and feed.entries):
                 try:
                     # Try using requests with chosen headers
                     response = requests.get(
@@ -516,6 +581,12 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
                     if response.status_code == 200:
                         # Try each parser in sequence
                         for parser in FEED_PARSERS:
+                            parser_approach = f"parser_{parser}"
+                            if parser_approach in tried_approaches:
+                                continue
+
+                            tried_approaches.add(parser_approach)
+
                             try:
                                 if parser == 'xml':
                                     # First try feedparser
@@ -523,6 +594,8 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
 
                                     # If we have entries, break the loop
                                     if hasattr(feed, 'entries') and feed.entries:
+                                        logger.info(
+                                            f"Feedparser successful with {parser}")
                                         break
 
                                 # If feedparser doesn't work or we're trying alternative parsers
@@ -539,33 +612,63 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
                             except Exception as parser_e:
                                 logger.debug(
                                     f"Parser {parser} failed: {parser_e}")
+                                parse_errors += 1
                                 continue
                     else:
+                        http_status = response.status_code
                         logger.warning(
-                            f"HTTP error {response.status_code} for {feed_url}")
+                            f"HTTP error {http_status} for {feed_url}")
+                        http_errors += 1
+
+                        # Adapt retry strategy based on HTTP status
+                        if http_status == 403:  # Forbidden
+                            # Forbidden might mean we need to vary our user agent more
+                            logger.info(
+                                "Forbidden response, trying with different headers")
+                            headers['Accept'] = '*/*'
+                            headers['User-Agent'] = random.choice(USER_AGENTS)
+                        elif http_status == 429:  # Too many requests
+                            # Rate limited, back off more aggressively
+                            timeout_errors += 2  # Count as two timeouts
+                        elif http_status >= 500:  # Server error
+                            # Server error, might be temporary
+                            http_errors += 1
+
                 except requests.Timeout as e:
                     logger.warning(f"Timeout error for {feed_url}: {e}")
                     timeout_errors += 1
-                    retries += 1
 
                     # For timeout errors, we might need a longer delay
-                    sleep_time = RETRY_DELAY * (retries + timeout_errors)
+                    sleep_time = min(
+                        RETRY_DELAY * (2 ** timeout_errors), MAX_DELAY)
                     logger.info(
                         f"Timeout occurred, retrying in {sleep_time} seconds...")
                     time.sleep(sleep_time)
+                    retries += 1
+                    continue
+                except requests.ConnectionError as e:
+                    logger.warning(f"Connection error for {feed_url}: {e}")
+                    connection_errors += 1
+
+                    # Connection errors might require different backoff strategy
+                    sleep_time = min(
+                        RETRY_DELAY * (connection_errors + 1), MAX_DELAY)
+                    logger.info(
+                        f"Connection error, retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                    retries += 1
                     continue
                 except Exception as e:
                     logger.warning(f"Request error for {feed_url}: {e}")
 
                     # If requests fails, fall back to feedparser's built-in fetching
                     try:
-                        feed = feedparser.parse(feed_url)
+                        if 'direct_feedparser_fallback' not in tried_approaches:
+                            tried_approaches.add('direct_feedparser_fallback')
+                            feed = feedparser.parse(feed_url)
                     except Exception as inner_e:
                         logger.error(
                             f"Feedparser fallback also failed for {feed_url}: {inner_e}")
-                        retries += 1
-                        time.sleep(RETRY_DELAY * (retries + 1))
-                        continue
 
             # Process feedparser results if we have them
             if feed and hasattr(feed, 'entries') and feed.entries:
@@ -644,38 +747,135 @@ def extract_content_from_rss_feed(feed_url: str) -> List[Dict[str, Any]]:
                         f"Successfully processed {len(articles)} articles from feed {feed_url}")
                     return articles
 
-            # If we got here without returning articles, retry with a different approach
-            logger.warning(
-                f"Standard methods failed for {feed_url}, trying alternative approach")
+            # Advanced techniques for problematic feeds
+            if retries >= MAX_RETRIES // 2:  # Only try these for later retries to save resources
+                # Try JSON-based feeds using requests + JSON parsing
+                if 'json_approach' not in tried_approaches:
+                    tried_approaches.add('json_approach')
+                    try:
+                        logger.info(f"Trying JSON approach for {feed_url}")
+                        json_headers = headers.copy()
+                        json_headers['Accept'] = 'application/json, */*'
 
-            # Try to scrape with full web browser simulation for very problematic feeds
-            if retries >= 2:  # Only try this approach after standard methods have failed twice
-                try:
-                    # Try to use a more powerful scraping method
-                    result = _try_extract_with_raw_http(feed_url)
-                    if result and len(result) > 0:
-                        logger.info(
-                            f"Successfully extracted {len(result)} articles with raw HTTP method")
-                        return result
-                except Exception as e:
-                    logger.error(f"Alternative extraction method failed: {e}")
+                        json_response = requests.get(
+                            feed_url, headers=json_headers, timeout=current_timeout)
+                        if json_response.status_code == 200:
+                            try:
+                                # Check if it's valid JSON
+                                data = json.loads(json_response.text)
+
+                                # Find articles in common JSON structures
+                                json_articles = []
+
+                                # Look for common patterns in JSON feeds
+                                if 'items' in data:
+                                    items = data['items']
+                                elif 'entries' in data:
+                                    items = data['entries']
+                                elif 'articles' in data:
+                                    items = data['articles']
+                                elif 'posts' in data:
+                                    items = data['posts']
+                                else:
+                                    items = []
+
+                                for item in items:
+                                    article = {}
+                                    # Extract fields from JSON
+                                    article['title'] = item.get('title', '')
+
+                                    # Try different link fields
+                                    article['link'] = item.get('link', item.get(
+                                        'url', item.get('permalink', '')))
+
+                                    # Skip without link
+                                    if not article['link']:
+                                        continue
+
+                                    # Normalize link
+                                    article['link'] = normalize_url(
+                                        article['link'])
+
+                                    # Other fields
+                                    article['pubDate'] = item.get(
+                                        'pubDate', item.get('date', item.get('published', '')))
+                                    article['description'] = item.get(
+                                        'description', item.get('summary', item.get('excerpt', '')))
+                                    article['author'] = item.get(
+                                        'author', item.get('creator', ''))
+                                    article['content'] = item.get(
+                                        'content', article['description'])
+
+                                    json_articles.append(article)
+
+                                if json_articles:
+                                    logger.info(
+                                        f"JSON approach found {len(json_articles)} articles for {feed_url}")
+                                    return json_articles
+                            except json.JSONDecodeError:
+                                logger.debug(
+                                    f"Not a valid JSON response from {feed_url}")
+                    except Exception as e:
+                        logger.warning(
+                            f"JSON approach failed for {feed_url}: {e}")
+
+                # Try to scrape with raw HTTP method for very problematic feeds
+                if 'raw_http_approach' not in tried_approaches:
+                    tried_approaches.add('raw_http_approach')
+                    try:
+                        # Try to use a more powerful scraping method
+                        logger.info(f"Trying raw HTTP approach for {feed_url}")
+                        result = _try_extract_with_raw_http(feed_url)
+                        if result and len(result) > 0:
+                            logger.info(
+                                f"Successfully extracted {len(result)} articles with raw HTTP method")
+                            return result
+                    except Exception as e:
+                        logger.error(f"Raw HTTP approach failed: {e}")
+
+            # Check if we've exceeded the overall timeout
+            if time.time() - overall_start_time > max_overall_timeout:
+                logger.warning(
+                    f"Exceeded maximum time ({max_overall_timeout}s) trying to extract content from {feed_url}. Giving up.")
+                _log_failed_feed(
+                    feed_url, f"Exceeded maximum timeout of {max_overall_timeout}s")
+                return articles
+
+            # If we have retried too many times, give up
+            if retries >= MAX_RETRIES:
+                logger.warning(
+                    f"Maximum retries ({MAX_RETRIES}) reached for {feed_url}. Giving up.")
+                _log_failed_feed(
+                    feed_url, f"Maximum retries ({MAX_RETRIES}) reached")
+                return articles
+
+            # Calculate delay for next retry with adaptive backoff
+            retry_delay = min(RETRY_DELAY * (2 ** retries), MAX_DELAY)
+
+            # Adjust delay based on error types
+            if timeout_errors > 0:
+                retry_delay *= min(1.5, 1 + (timeout_errors * 0.2))
+            if http_errors > 0:
+                retry_delay *= min(1.3, 1 + (http_errors * 0.1))
+
+            # Add jitter to avoid thundering herd (±20%)
+            jitter_factor = random.uniform(0.8, 1.2)
+            retry_delay *= jitter_factor
 
             retries += 1
             if retries < MAX_RETRIES:
                 logger.info(
-                    f"Retrying in {RETRY_DELAY * (retries + 1)} seconds... (Attempt {retries+1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY * (retries + 1))  # Exponential backoff
+                    f"Retrying in {retry_delay:.1f} seconds... (Attempt {retries+1}/{MAX_RETRIES})")
+                time.sleep(retry_delay)
 
         except Exception as e:
             logger.error(f"Error extracting content from feed {feed_url}: {e}")
             retries += 1
             if retries < MAX_RETRIES:
+                sleep_time = min(RETRY_DELAY * (2 ** retries), MAX_DELAY)
                 logger.info(
-                    f"Retrying in {RETRY_DELAY * (retries + 1)} seconds... (Attempt {retries+1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY * (retries + 1))  # Exponential backoff
-            else:
-                logger.error(
-                    f"Failed to extract content from {feed_url} after {MAX_RETRIES} attempts")
+                    f"Retrying in {sleep_time:.1f} seconds... (Attempt {retries+1}/{MAX_RETRIES})")
+                time.sleep(sleep_time)
 
     # Log empty article info as this is our most common failure
     if not articles:

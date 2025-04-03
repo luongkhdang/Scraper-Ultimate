@@ -1,3 +1,8 @@
+SELECT \*
+FROM public.articles
+WHERE LENGTH(content) < 500
+OR array_length(regexp_split_to_array(content, '\s+'), 1) < 80;
+
 1. **Newspaper3k Strategy** - Primary strategy for well-structured news sites
 2. **BeautifulSoup Strategy** - Fallback for when Newspaper3k fails
 3. **Playwright Strategy** - Used for JavaScript-heavy websites
@@ -20,8 +25,6 @@ https://www.latimes.com/business/rss2.0.xml
 https://www.latimes.com/opinion/rss2.0.xml
 https://feeds.businessinsider.com/custom/all
 https://markets.businessinsider.com/rss/news
-https://chaski.huffpost.com/us/auto/vertical/us-news
-https://chaski.huffpost.com/us/auto/vertical/world-news
 https://www.economist.com/finance-and-economics/rss.xml
 https://www.economist.com/asia/rss.xml
 https://www.economist.com/china/rss.xml
@@ -30,14 +33,11 @@ https://www.economist.com/international/rss.xml
 https://www.economist.com/finance-and-economics/rss.xml
 https://www.economist.com/business/rss.xml
 http://feeds.feedburner.com/DrudgeReportFeed
-https://www.usnews.com/rss/money
 https://www.usnews.com/rss/news
 https://www.usnews.com/rss/the-report
 https://www.theatlantic.com/feed/channel/politics/
-https://www.theatlantic.com/feed/channel/business/
 https://www.theatlantic.com/feed/channel/international/
 https://www.theatlantic.com/feed/channel/technology/
-https://www.globaltimes.cn/rss/outbrain.xml
 https://news.yahoo.com/rss/finance
 https://abcnews.go.com/abcnews/usheadlines
 https://news.yahoo.com/rss/us
@@ -54,7 +54,6 @@ https://feeds.washingtonpost.com/rss/rss_the-fix
 https://feeds.washingtonpost.com/rss/rss_rampage
 https://feeds.washingtonpost.com/rss/world
 https://feeds.washingtonpost.com/rss/national
-https://fortune.com/feed
 https://www.theguardian.com/business/economics/rss
 https://www.theguardian.com/us-news/us-politics/rss
 https://www.theguardian.com/us/business/rss
@@ -63,7 +62,6 @@ https://www.theguardian.com/us/commentisfree/rss
 https://www.theguardian.com/us/business/rss
 https://feedx.net/rss/ap.xml
 https://www.telegraph.co.uk/business/rss.xml
-https://www.telegraph.co.uk/politics/rss.xml
 https://www.the-independent.com/news/business/rss
 https://www.the-independent.com/news/world/rss
 https://feeds.content.dowjones.io/public/rss/RSSWorldNews
@@ -82,24 +80,20 @@ https://nypost.com/opinion/feed/
 https://feeds.feedburner.com/timeblogs/swampland
 https://asia.nikkei.com/rss/feed/nar
 https://feeds.content.dowjones.io/public/rss/mw_bulletins
-https://feeds.content.dowjones.io/public/rss/mw_marketpulse
-http://feeds.marketwatch.com/marketwatch/realtimeheadlines
 https://www.entrepreneur.com/latest.rss
-https://www.investing.com/rss/news.rss
 https://seekingalpha.com/market_currents.xml
 https://seekingalpha.com/tag/market-outlook/feed
 https://feeds.feedburner.com/hackread
 https://feeds.feedburner.com/CalculatedRisk
-https://www.businesstimes.com.sg/rss/government-economy
 https://www.businesstimes.com.sg/rss/banking-finance
 https://www.nakedcapitalism.com/feed
 https://feeds.feedburner.com/zerohedge/feed
 https://prod-qt-images.s3.amazonaws.com/production/bloombergquint/feed.xml
-https://feeds.feedburner.com/ndtvprofit-latest
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=economy
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=vietnam
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=tax
 https://biztoc.com/feed
+https://rsshub.app/straitstimes/singapore
 
 https://abcnews.go.com
 https://apnews.com
@@ -182,7 +176,6 @@ https://japantoday.com/
 https://jsonline.com
 https://latimes.com
 https://livescience.com
-https://markets.businessinsider.com
 https://markets.businessinsider.com
 https://marketwatch.com
 https://mercurynews.com

@@ -5,7 +5,8 @@ This file acts as the main entry point and orchestrates the scraping workflow:
 1. Extract URLs from RSS feeds (sources/rss.md)
 2. Process pending articles 
 3. Handle failed scrapes
-4. Export domain statistics and failed feeds
+4. Retry failed articles with a limited number of workers
+5. Export domain statistics and failed feeds
 
 Related Files:
 - main_hooks/: Contains the core scraping functionality
@@ -23,6 +24,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
 # Add the src directory to the path so we can import the scraper client
@@ -43,7 +45,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Scraper configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '50'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
 PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '250'))
 
 
@@ -146,34 +148,7 @@ def main():
         # Initialize the scraper client
         scraper = ScraperClient()
 
-        # STEP 1: Process any pending articles from previous runs
-        logger.info(
-            "Starting to process pending articles before RSS scraping...")
-        total_processed = 0
-        batch_count = 0
-        while True:
-            batch_count += 1
-            logger.info(
-                f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
-            processed_count = process_pending_articles(
-                scraper, db_client, PENDING_BATCH_SIZE)
-
-            total_processed += processed_count
-            logger.info(
-                f"Batch #{batch_count} complete: processed {processed_count} articles")
-
-            if processed_count == 0:
-                logger.info(
-                    "No more pending articles to process, moving to RSS feed scraping")
-                break
-            else:
-                logger.info(
-                    f"Continuing to next batch, {processed_count} articles processed in this batch")
-
-        logger.info(
-            f"Initial pending article processing complete. Total articles processed: {total_processed}")
-
-        # STEP 2: Read RSS feeds from the file
+        # Read RSS feeds from the file
         rss_feeds_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                       'sources', 'rss.md')
         rss_feeds = read_rss_feeds_from_file(rss_feeds_file)
@@ -182,73 +157,153 @@ def main():
             logger.error("No RSS feeds found. Exiting.")
             return
 
-        logger.info(f"Starting RSS feed scraping for {len(rss_feeds)} feeds")
+        # Create two separate thread pools: one for RSS feeds, one for pending articles
+        # Use half the workers for RSS feeds, minimum 3
+        rss_workers = max(PARALLEL_WORKERS // 2, 3)
+        # Use half the workers for articles, minimum 3
+        article_workers = max(PARALLEL_WORKERS // 2, 3)
 
-        # Process RSS feeds in parallel
+        logger.info(
+            f"Creating thread pools with {rss_workers} RSS workers and {article_workers} article workers")
+
+        # Process pending articles and RSS feeds concurrently
+        total_processed = 0
         total_articles = 0
         failed_feeds = {}
-        with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+
+        # Create a ThreadPoolExecutor for RSS feeds
+        with ThreadPoolExecutor(max_workers=rss_workers) as rss_executor:
             # Submit all RSS feed processing tasks
+            logger.info(
+                f"Starting RSS feed scraping for {len(rss_feeds)} feeds")
             future_to_feed = {
-                executor.submit(process_rss_feed, feed, scraper, db_client): feed
+                rss_executor.submit(process_rss_feed, feed, scraper, db_client): feed
                 for feed in rss_feeds
             }
 
-            # Collect results as they complete
-            for future in future_to_feed:
-                feed = future_to_feed[future]
-                try:
-                    articles_count = future.result()
-                    total_articles += articles_count
+            # Start a separate thread pool for article processing
+            with ThreadPoolExecutor(max_workers=article_workers) as article_executor:
+                # Process pending articles in the background while RSS feeds are being processed
+                # Use a shared flag to coordinate when to stop processing pending articles
+                pending_processing_complete = False
 
-                    # Track feeds with zero articles as potentially failed
-                    if articles_count == 0:
+                def process_pending_articles_continuously():
+                    nonlocal total_processed
+                    batch_count = 0
+                    local_processed = 0
+
+                    while not pending_processing_complete:
+                        batch_count += 1
+                        logger.info(
+                            f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
+                        processed_count = process_pending_articles(
+                            scraper, db_client, PENDING_BATCH_SIZE)
+
+                        total_processed += processed_count
+                        local_processed += processed_count
+                        logger.info(
+                            f"Batch #{batch_count} complete: processed {processed_count} articles")
+
+                        if processed_count == 0:
+                            # No more pending articles, but don't exit the loop yet
+                            # Wait a bit to see if more articles come from RSS processing
+                            logger.info(
+                                "No pending articles, waiting for more from RSS feeds...")
+                            time.sleep(5)
+
+                    return local_processed
+
+                # Start the pending article processing
+                pending_future = article_executor.submit(
+                    process_pending_articles_continuously)
+
+                # Collect RSS feed results as they complete
+                for future in future_to_feed:
+                    feed = future_to_feed[future]
+                    try:
+                        articles_count = future.result()
+                        total_articles += articles_count
+
+                        # Track feeds with zero articles as potentially failed
+                        if articles_count == 0:
+                            failed_feeds[feed] = {
+                                "error": "No articles extracted",
+                                "timestamp": str(datetime.now())
+                            }
+                    except Exception as e:
+                        logger.error(f"Error processing RSS feed {feed}: {e}")
                         failed_feeds[feed] = {
-                            "error": "No articles extracted",
+                            "error": str(e),
                             "timestamp": str(datetime.now())
                         }
-                except Exception as e:
-                    logger.error(f"Error processing RSS feed {feed}: {e}")
-                    failed_feeds[feed] = {
-                        "error": str(e),
-                        "timestamp": str(datetime.now())
-                    }
+
+                # Signal that RSS processing is complete
+                logger.info(
+                    f"RSS feed scraping completed. Total article URLs stored: {total_articles}")
+                logger.info(
+                    f"RSS feed scraping failed for {len(failed_feeds)} feeds")
+
+                # Allow the pending article processor to finish any remaining articles
+                # but stop after processing the current batch if no more articles
+                pending_processing_complete = True
+
+                # Wait for pending article processing to complete
+                additional_processed = pending_future.result()
+                logger.info(
+                    f"Pending article processing complete. Total articles processed: {total_processed}")
+
+        # STEP 4: Retry processing failed articles with limited workers
+        logger.info(
+            "========== STARTING STEP 4: RETRYING FAILED ARTICLES ==========")
+        logger.info(
+            "Retrying articles with 'FAILED' status using 5 parallel workers...")
+
+        # Get failed articles from the database
+        failed_articles = db_client.get_failed_articles()
+
+        if failed_articles:
+            failed_count = len(failed_articles)
+            logger.info(f"Found {failed_count} failed articles to retry")
+
+            # Use a smaller number of workers for retries to be more careful
+            # Maximum 5 workers for retries
+            retry_workers = min(5, PARALLEL_WORKERS)
+
+            # Extract URLs from failed articles
+            failed_urls = [article['url'] for article in failed_articles]
+
+            # Process failed articles in batches
+            retry_batch_size = 50  # Process in smaller batches
+            successfully_retried = 0
+
+            for i in range(0, len(failed_urls), retry_batch_size):
+                batch_urls = failed_urls[i:i+retry_batch_size]
+                logger.info(
+                    f"Processing retry batch {i//retry_batch_size + 1} of {(len(failed_urls) + retry_batch_size - 1) // retry_batch_size} ({len(batch_urls)} articles)")
+
+                # Process this batch of failed articles
+                success_count = process_pending_articles(
+                    scraper,
+                    db_client,
+                    batch_size=retry_batch_size,
+                    specific_urls=batch_urls
+                )
+
+                successfully_retried += success_count
+                logger.info(
+                    f"Retry batch complete: {success_count} articles successfully processed")
+
+                # Add a small delay between batches
+                if i + retry_batch_size < len(failed_urls):
+                    time.sleep(2)
+
+            logger.info(
+                f"Retry processing complete. Successfully retried {successfully_retried} out of {failed_count} articles")
+        else:
+            logger.info("No failed articles found to retry")
 
         logger.info(
-            f"RSS feed scraping completed. Total article URLs stored: {total_articles}")
-        logger.info(f"RSS feed scraping failed for {len(failed_feeds)} feeds")
-
-        # STEP 3: Process any new pending articles that were just added from RSS feeds
-        if total_articles > 0:
-            logger.info(
-                "Processing newly added pending articles from RSS feeds...")
-            additional_processed = 0
-            new_batch_count = 0
-            while True:
-                new_batch_count += 1
-                logger.info(
-                    f"Processing batch #{new_batch_count} of new pending articles (batch size: {PENDING_BATCH_SIZE})")
-                processed_count = process_pending_articles(
-                    scraper, db_client, PENDING_BATCH_SIZE)
-
-                additional_processed += processed_count
-                logger.info(
-                    f"Batch #{new_batch_count} complete: processed {processed_count} articles")
-
-                if processed_count == 0:
-                    logger.info(
-                        "No more pending articles to process, exiting loop")
-                    break
-                else:
-                    logger.info(
-                        f"Continuing to next batch, {processed_count} articles processed in this batch")
-
-            logger.info(
-                f"Additional pending article processing complete. Total new articles processed: {additional_processed}")
-            total_processed += additional_processed
-
-        logger.info(
-            f"All pending article processing complete. Grand total processed: {total_processed}")
+            "========== COMPLETED STEP 4: RETRYING FAILED ARTICLES ==========")
 
         # Export failed RSS feeds
         if failed_feeds:

@@ -3,7 +3,7 @@ Feed Processor: Processes RSS feed content, extracting specified fields.
 
 Exported Functions:
 - filter_feed_content(feed_items: List[Dict[str, Any]]) -> List[Dict[str, str]]: Filters feed content to include only specific fields
-- filter_by_date(feed_items: List[Dict[str, str]], days: int = 2) -> List[Dict[str, str]]: Filters feed items by publication date
+- filter_by_date(feed_items: List[Dict[str, str]], days: int = 2, feed_url: str = None) -> List[Dict[str, str]]: Filters feed items by publication date
 
 Related Files:
 - scraper_client.py: Main client file that uses these functions
@@ -50,13 +50,14 @@ def parse_date(date_str: str) -> datetime.datetime:
     return None
 
 
-def filter_by_date(feed_items: List[Dict[str, str]], days: int = 2) -> List[Dict[str, str]]:
+def filter_by_date(feed_items: List[Dict[str, str]], days: int = 2, feed_url: str = None) -> List[Dict[str, str]]:
     """
     Filter feed items to only include those published within specified days
 
     Args:
         feed_items: List of dictionaries containing feed item data
         days: Number of days to look back (default: 2 day)
+        feed_url: Original feed URL for special handling of certain feeds
 
     Returns:
         List of dictionaries filtered by publication date
@@ -67,6 +68,29 @@ def filter_by_date(feed_items: List[Dict[str, str]], days: int = 2) -> List[Dict
 
     logger.info(
         f"Filtering items by publication date: newer than {cutoff.isoformat()}")
+
+    # List of exempt feeds that always provide recent content but may not have pubDate
+    EXEMPT_FEEDS = [
+        "https://rsshub.app/apnews/topics/apf-topnews",
+        "https://asia.nikkei.com/rss/feed/nar"
+    ]
+
+    # Check if this is an exempt feed that should bypass date filtering
+    is_exempt_feed = feed_url and any(
+        exempt_feed in feed_url for exempt_feed in EXEMPT_FEEDS)
+    if is_exempt_feed:
+        logger.info(
+            f"Feed {feed_url} is exempt from date filtering - all articles will be kept")
+
+        # Add current timestamp as pubDate for articles without pubDate
+        timestamp_str = now.strftime("%a, %d %b %Y %H:%M:%S %z")
+        for item in feed_items:
+            if not item.get('pubDate'):
+                item['pubDate'] = timestamp_str
+                logger.debug(
+                    f"Added current timestamp as pubDate for article: {item.get('title', 'No title')}")
+
+        return feed_items
 
     filtered_items = []
     skipped_items = 0

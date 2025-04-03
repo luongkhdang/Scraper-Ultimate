@@ -21,6 +21,8 @@ from psycopg2.extras import Json
 from typing import Dict, Optional, Any, List
 from dotenv import load_dotenv
 from psycopg2 import pool
+import threading
+import time
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -39,9 +41,17 @@ DB_CONFIG = {
     'port': os.environ.get('DB_PORT', '5432')
 }
 
-# Configure connection pool size
-MIN_CONNECTIONS = int(os.environ.get('DB_MIN_CONNECTIONS', '5'))
-MAX_CONNECTIONS = int(os.environ.get('DB_MAX_CONNECTIONS', '20'))
+# Get PARALLEL_WORKERS from environment for connection pool sizing
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
+
+# Configure connection pool size based on parallel workers
+# We need at least as many connections as workers, plus some overhead
+MIN_CONNECTIONS = max(3, PARALLEL_WORKERS // 2)
+MAX_CONNECTIONS = max(15, PARALLEL_WORKERS + 5)
+
+# Pool health monitoring
+CONNECTION_TIMEOUT = 30  # seconds to wait for a connection before timeout
+POOL_MONITORING_INTERVAL = 300  # check pool health every 5 minutes
 
 
 class PostgreSQLClient:
@@ -50,10 +60,19 @@ class PostgreSQLClient:
         self.db_config = db_config or DB_CONFIG
         logger.info(
             f"Database connection: {self.db_config['dbname']} on {self.db_config['host']}:{self.db_config['port']} as {self.db_config['user']}")
+        logger.info(
+            f"Connection pool configured with min={MIN_CONNECTIONS}, max={MAX_CONNECTIONS} connections")
 
         # Initialize connection pool
         self._connection_pool = None
         self._init_connection_pool()
+
+        # Track active connections for monitoring
+        self._active_connections = 0
+        self._connection_lock = threading.Lock()
+
+        # Start pool monitoring in background
+        self._start_pool_monitoring()
 
     def _init_connection_pool(self):
         """Initialize the connection pool"""
@@ -70,21 +89,67 @@ class PostgreSQLClient:
             # Fall back to single connections if pool creation fails
             self._connection_pool = None
 
+    def _start_pool_monitoring(self):
+        """Start a background thread to monitor pool health"""
+        def monitor_pool():
+            while True:
+                time.sleep(POOL_MONITORING_INTERVAL)
+                with self._connection_lock:
+                    logger.info(
+                        f"Connection pool status: {self._active_connections} active connections")
+                    # If too many active connections, consider expanding the pool
+                    if self._active_connections > MAX_CONNECTIONS * 0.8:
+                        logger.warning(
+                            f"Connection pool utilization high: {self._active_connections}/{MAX_CONNECTIONS}")
+
+        # Start monitoring thread
+        monitor_thread = threading.Thread(target=monitor_pool, daemon=True)
+        monitor_thread.start()
+
     def get_connection(self):
-        """Get a connection to the database"""
-        try:
-            if self._connection_pool:
-                return self._connection_pool.getconn()
-            else:
-                return psycopg2.connect(**self.db_config)
-        except Exception as e:
-            logger.error(f"Error getting database connection: {e}")
-            raise
+        """Get a connection to the database with timeout"""
+        start_time = time.time()
+        exception = None
+
+        # Try to get a connection with exponential backoff
+        backoff = 0.1
+        max_backoff = 1.0
+
+        while time.time() - start_time < CONNECTION_TIMEOUT:
+            try:
+                if self._connection_pool:
+                    conn = self._connection_pool.getconn()
+                    with self._connection_lock:
+                        self._active_connections += 1
+                    return conn
+                else:
+                    return psycopg2.connect(**self.db_config)
+            except (psycopg2.pool.PoolError, Exception) as e:
+                exception = e
+                # Wait with exponential backoff
+                time.sleep(min(backoff, max_backoff))
+                backoff *= 1.5
+
+        # If we got here, we timed out
+        logger.error(
+            f"Timed out getting database connection after {CONNECTION_TIMEOUT}s: {exception}")
+        raise psycopg2.OperationalError(
+            f"Connection pool timeout after {CONNECTION_TIMEOUT}s: {exception}")
 
     def release_connection(self, conn):
         """Return a connection to the pool"""
         if self._connection_pool and conn:
-            self._connection_pool.putconn(conn)
+            try:
+                self._connection_pool.putconn(conn)
+                with self._connection_lock:
+                    self._active_connections -= 1
+            except Exception as e:
+                logger.error(f"Error returning connection to pool: {e}")
+                # Try to close the connection if we can't return it to the pool
+                try:
+                    conn.close()
+                except:
+                    pass
 
     def setup_database(self) -> None:
         """Create the necessary tables in the database if they don't exist"""
@@ -343,33 +408,42 @@ class PostgreSQLClient:
         Returns:
             Dictionary mapping each URL to a boolean indicating if it exists
         """
+        if not urls:
+            return {}
+
         conn = None
         cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Create a temporary table for the URLs
-            cursor.execute("""
-                CREATE TEMP TABLE temp_urls (url TEXT PRIMARY KEY) ON COMMIT DROP
-            """)
+            # If there are too many URLs, split into batches to avoid query limits
+            batch_size = 1000  # Increase from default to boost performance
+            url_exists_map = {}
 
-            # Insert URLs into the temporary table using executemany for efficiency
-            args = [(url,) for url in urls]
-            cursor.executemany("""
-                INSERT INTO temp_urls (url) VALUES (%s)
-            """, args)
+            for i in range(0, len(urls), batch_size):
+                batch_urls = urls[i:i+batch_size]
 
-            # Join with articles table to find existing URLs
-            cursor.execute("""
-                SELECT t.url, EXISTS(SELECT 1 FROM articles a WHERE a.url = t.url)
-                FROM temp_urls t
-            """)
+                # Use a VALUES expression for better performance with larger batches
+                placeholders = ",".join([f"(%s)" for _ in batch_urls])
+                query = f"""
+                    WITH input_urls(url) AS (
+                        VALUES {placeholders}
+                    )
+                    SELECT i.url, EXISTS(
+                        SELECT 1 FROM articles a WHERE a.url = i.url
+                    )
+                    FROM input_urls i
+                """
 
-            # Create result map
-            url_exists_map = {row[0]: row[1] for row in cursor.fetchall()}
+                # Flatten the list for the query parameters
+                cursor.execute(query, batch_urls)
 
-            # For any URLs not in the result, they don't exist
+                # Add results to the map
+                batch_results = {row[0]: row[1] for row in cursor.fetchall()}
+                url_exists_map.update(batch_results)
+
+            # Ensure all URLs are in the result map
             for url in urls:
                 if url not in url_exists_map:
                     url_exists_map[url] = False
@@ -377,9 +451,22 @@ class PostgreSQLClient:
             return url_exists_map
         except Exception as e:
             logger.error(f"Error batch checking URLs in database: {e}")
-            # Fall back to individual checks on error
+            # Fall back to individual checks on error, but use a more efficient approach
             logger.info("Falling back to individual URL checks")
-            return {url: self.check_url_in_database(url) for url in urls}
+
+            # Create a more efficient fallback that still batches requests
+            url_exists_map = {}
+            try:
+                # Try with smaller batches
+                small_batch_size = 100
+                for i in range(0, len(urls), small_batch_size):
+                    small_batch = urls[i:i+small_batch_size]
+                    for url in small_batch:
+                        url_exists_map[url] = self.check_url_in_database(url)
+                return url_exists_map
+            except:
+                # Last resort: one by one
+                return {url: self.check_url_in_database(url) for url in urls}
         finally:
             if cursor:
                 cursor.close()
@@ -433,6 +520,93 @@ class PostgreSQLClient:
         except Exception as e:
             logger.error(f"Error getting failed domains: {e}")
             return {}
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                self.release_connection(conn)
+
+    def get_failed_articles(self, limit: int = 1000) -> list:
+        """
+        Get articles with 'FAILED' status for retry processing
+
+        Args:
+            limit: Maximum number of articles to retrieve
+
+        Returns:
+            List of dictionaries containing failed article data
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, url, domain, title, error_message
+                FROM articles
+                WHERE proceeding_status = 'FAILED'
+                ORDER BY id ASC
+                LIMIT %s
+            """, (limit,))
+
+            articles = []
+            for row in cursor.fetchall():
+                articles.append({
+                    'id': row[0],
+                    'url': row[1],
+                    'domain': row[2],
+                    'title': row[3],
+                    'error_message': row[4]
+                })
+
+            logger.info(f"Retrieved {len(articles)} failed articles for retry")
+            return articles
+        except Exception as e:
+            logger.error(f"Error getting failed articles: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                self.release_connection(conn)
+
+    def get_article_by_url(self, url: str) -> Optional[Dict]:
+        """
+        Get article data for a specific URL
+
+        Args:
+            url: The URL of the article to retrieve
+
+        Returns:
+            Dictionary containing article data or None if not found
+        """
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, url, domain, title
+                FROM articles
+                WHERE url = %s
+            """, (url,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'url': row[1],
+                    'domain': row[2],
+                    'title': row[3]
+                }
+
+            logger.warning(f"Article not found for URL: {url}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting article by URL {url}: {e}")
+            return None
         finally:
             if cursor:
                 cursor.close()

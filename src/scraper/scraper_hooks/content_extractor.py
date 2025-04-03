@@ -37,6 +37,10 @@ except ImportError:
 # A dictionary to track domains with old articles
 domains_with_old_articles = {}  # domain -> count of old articles
 
+# Constants for content validation
+MIN_CONTENT_CHARS = 800
+MIN_CONTENT_WORDS = 100
+
 
 def _follow_redirect(url: str) -> Tuple[str, str]:
     """Follow URL redirects and return the final destination URL and domain
@@ -500,6 +504,31 @@ def _extract_with_soup(response_text: str) -> Optional[str]:
     return None
 
 
+def _is_content_too_short(content: str) -> bool:
+    """
+    Check if the content is too short to be a valid article
+
+    Args:
+        content: The article content string
+
+    Returns:
+        True if content is too short, False otherwise
+    """
+    if not content:
+        return True
+
+    # Check character count
+    if len(content) < MIN_CONTENT_CHARS:
+        # Also check word count as a secondary measure
+        word_count = len(content.split())
+        if word_count < MIN_CONTENT_WORDS:
+            logger.warning(
+                f"Content too short: {len(content)} chars, {word_count} words")
+            return True
+
+    return False
+
+
 def extract_article_content(article_url: str, referrer: str = None) -> Optional[Dict[str, Any]]:
     """
     Extract content from an article URL
@@ -511,154 +540,195 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
     Returns:
         Dictionary containing article details or None if extraction fails
     """
-    try:
-        logger.info(f"Extracting content from {article_url}")
+    # Maximum retries for short content detection
+    max_retries = 3
 
-        # Get original domain for logging
-        original_url = article_url
-        original_domain = urlparse(article_url).netloc.lower()
-
-        # Special handling for BizToc URLs
-        is_biztoc = "biztoc.com" in original_domain
-
-        # Follow redirects to get the real article URL if it's a redirect link
-        # Check if this is likely a redirect URL
-        is_redirect_url = any([
-            is_biztoc,
-            ("news.google.com" in original_domain),
-            ("/redirect/" in article_url),
-            ("/r?" in article_url),
-            ("url=" in article_url)
-        ])
-
-        final_domain = original_domain
-        if is_redirect_url:
-            # Follow redirects to get the actual article URL
-            article_url, final_domain = _follow_redirect(article_url)
-
-            if article_url != original_url:
-                # Update domain to the one we actually redirected to
+    for retry_count in range(max_retries):
+        try:
+            if retry_count > 0:
                 logger.info(
-                    f"Redirected from {original_domain} to {final_domain}")
+                    f"Retry #{retry_count} for {article_url} due to short content")
+                # Add increasing delay between retries
+                random_delay(1.0 + retry_count, 3.0 + retry_count)
 
-                # For BizToc, add a delay to ensure the target page has time to load
-                if is_biztoc:
+            logger.info(f"Extracting content from {article_url}")
+
+            # Get original domain for logging
+            original_url = article_url
+            original_domain = urlparse(article_url).netloc.lower()
+
+            # Special handling for BizToc URLs
+            is_biztoc = "biztoc.com" in original_domain
+
+            # Follow redirects to get the real article URL if it's a redirect link
+            # Check if this is likely a redirect URL
+            is_redirect_url = any([
+                is_biztoc,
+                ("news.google.com" in original_domain),
+                ("/redirect/" in article_url),
+                ("/r?" in article_url),
+                ("url=" in article_url)
+            ])
+
+            final_domain = original_domain
+            if is_redirect_url:
+                # Follow redirects to get the actual article URL
+                article_url, final_domain = _follow_redirect(article_url)
+
+                if article_url != original_url:
+                    # Update domain to the one we actually redirected to
                     logger.info(
-                        "BizToc URL detected, adding delay before scraping target page")
-                    # Simple delay to ensure the target page loads
-                    time.sleep(2)
+                        f"Redirected from {original_domain} to {final_domain}")
+
+                    # For BizToc, add a delay to ensure the target page has time to load
+                    if is_biztoc:
+                        logger.info(
+                            "BizToc URL detected, adding delay before scraping target page")
+                        # Simple delay to ensure the target page loads
+                        time.sleep(2)
+                else:
+                    logger.warning(
+                        f"Failed to follow redirect for {original_url}")
+
+            # Get domain from final URL to track old articles
+            domain = urlparse(article_url).netloc
+
+            # Skip if we've already found 3 old articles from this domain
+            if domain in domains_with_old_articles and domains_with_old_articles[domain] >= 3:
+                logger.info(
+                    f"Skipping domain {domain} because too many old articles were found")
+                return None
+
+            # Use realistic referrer
+            if not referrer:
+                referrer = get_referrer()
+
+            # Configure newspaper with random user agent
+            user_agent = get_random_user_agent()
+            newspaper.Config().browser_user_agent = user_agent
+            newspaper.Config().fetch_images = False  # Skip image fetching for performance
+
+            article = newspaper.Article(article_url)
+
+            # Instead of using article.download(), use our custom request method
+            headers = get_realistic_headers(article_url)
+            headers["Referer"] = referrer
+
+            # Add a random delay to mimic human behavior before downloading
+            random_delay()
+
+            # Use our custom method for downloading
+            response = make_request(article_url, headers=headers)
+            if response:
+                article.download(input_html=response.text)
             else:
-                logger.warning(f"Failed to follow redirect for {original_url}")
+                article.download()
 
-        # Get domain from final URL to track old articles
-        domain = urlparse(article_url).netloc
+            # Add another random delay before parsing (as if a human is reading)
+            random_delay(2.0, 7.0)
 
-        # Skip if we've already found 3 old articles from this domain
-        if domain in domains_with_old_articles and domains_with_old_articles[domain] >= 3:
-            logger.info(
-                f"Skipping domain {domain} because too many old articles were found")
+            article.parse()
+            article.nlp()  # Natural language processing for keywords and summary
+
+            # Check if the article is older than 3 days
+            three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+
+            if article.publish_date:
+                # Ensure publish_date has timezone info
+                article_date = article.publish_date
+                if article_date.tzinfo is None:
+                    # Create a new datetime object with timezone info
+                    article_date = datetime(
+                        year=article_date.year,
+                        month=article_date.month,
+                        day=article_date.day,
+                        hour=article_date.hour,
+                        minute=article_date.minute,
+                        second=article_date.second,
+                        microsecond=article_date.microsecond,
+                        tzinfo=timezone.utc
+                    )
+
+                if article_date < three_days_ago:
+                    # Increment the count of old articles for this domain
+                    if domain in domains_with_old_articles:
+                        domains_with_old_articles[domain] += 1
+                    else:
+                        domains_with_old_articles[domain] = 1
+
+                    logger.info(
+                        f"Found old article from {domain} (count: {domains_with_old_articles[domain]})")
+
+                    # If we've found 3 old articles, log the info
+                    if domains_with_old_articles[domain] >= 3:
+                        logger.info(
+                            f"Will stop fetching from {domain} due to old articles")
+
+            # Create article data with additional browser-like metadata
+            article_data = {
+                'url': article_url,
+                'title': article.title,
+                'content': article.text,
+                'authors': article.authors,
+                'published_date': article.publish_date.isoformat() if article.publish_date else None,
+                'scraped_at': datetime.now(timezone.utc).isoformat(),
+                'original_domain': original_domain,
+                'final_domain': final_domain
+            }
+
+            # First check if the content is too short
+            content_too_short = _is_content_too_short(article.text)
+            fallback_used = False
+
+            # Use fallbacks if content is too short or missing
+            if content_too_short or not article.text:
+                logger.warning(
+                    f"Article extraction may have failed for {article_url}. Using fallback methods")
+
+                # Try BeautifulSoup fallback
+                if response:
+                    soup_content = _extract_with_soup(response.text)
+                    if soup_content and not _is_content_too_short(soup_content):
+                        article_data['content'] = soup_content
+                        logger.info(
+                            f"Successfully extracted content using BeautifulSoup fallback for {article_url}")
+                        fallback_used = True
+                    elif soup_content:
+                        logger.warning(
+                            "BeautifulSoup content too short, trying Playwright")
+
+                # If BeautifulSoup fallback didn't work or content still too short, try Playwright
+                if (not fallback_used or _is_content_too_short(article_data['content'])):
+                    playwright_content = _extract_with_playwright(
+                        article_url, user_agent)
+                    if playwright_content and not _is_content_too_short(playwright_content):
+                        article_data['content'] = playwright_content
+                        fallback_used = True
+                        logger.info(
+                            f"Successfully extracted content using Playwright for {article_url}")
+                    elif playwright_content:
+                        logger.warning("Playwright content too short")
+
+            # Check if content is still too short after all fallbacks
+            if _is_content_too_short(article_data['content']):
+                if retry_count < max_retries - 1:
+                    logger.warning(
+                        f"Content still too short after fallbacks. Will retry extraction.")
+                    continue  # Try again
+                else:
+                    logger.error(
+                        f"Failed to extract sufficient content after {max_retries} attempts: {article_url}")
+                    return None
+
+            logger.info(f"Successfully extracted content from {article_url}")
+            return article_data
+
+        except Exception as e:
+            logger.error(f"Error extracting content from {article_url}: {e}")
+            if retry_count < max_retries - 1:
+                # Wait before retrying
+                time.sleep(2 * (retry_count + 1))
+                continue
             return None
 
-        # Use realistic referrer
-        if not referrer:
-            referrer = get_referrer()
-
-        # Configure newspaper with random user agent
-        user_agent = get_random_user_agent()
-        newspaper.Config().browser_user_agent = user_agent
-        newspaper.Config().fetch_images = False  # Skip image fetching for performance
-
-        article = newspaper.Article(article_url)
-
-        # Instead of using article.download(), use our custom request method
-        headers = get_realistic_headers(article_url)
-        headers["Referer"] = referrer
-
-        # Add a random delay to mimic human behavior before downloading
-        random_delay()
-
-        # Use our custom method for downloading
-        response = make_request(article_url, headers=headers)
-        if response:
-            article.download(input_html=response.text)
-        else:
-            article.download()
-
-        # Add another random delay before parsing (as if a human is reading)
-        random_delay(2.0, 7.0)
-
-        article.parse()
-        article.nlp()  # Natural language processing for keywords and summary
-
-        # Check if the article is older than 3 days
-        three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
-
-        if article.publish_date:
-            # Ensure publish_date has timezone info
-            article_date = article.publish_date
-            if article_date.tzinfo is None:
-                # Create a new datetime object with timezone info
-                article_date = datetime(
-                    year=article_date.year,
-                    month=article_date.month,
-                    day=article_date.day,
-                    hour=article_date.hour,
-                    minute=article_date.minute,
-                    second=article_date.second,
-                    microsecond=article_date.microsecond,
-                    tzinfo=timezone.utc
-                )
-
-            if article_date < three_days_ago:
-                # Increment the count of old articles for this domain
-                if domain in domains_with_old_articles:
-                    domains_with_old_articles[domain] += 1
-                else:
-                    domains_with_old_articles[domain] = 1
-
-                logger.info(
-                    f"Found old article from {domain} (count: {domains_with_old_articles[domain]})")
-
-                # If we've found 3 old articles, log the info
-                if domains_with_old_articles[domain] >= 3:
-                    logger.info(
-                        f"Will stop fetching from {domain} due to old articles")
-
-        # Create article data with additional browser-like metadata
-        article_data = {
-            'url': article_url,
-            'title': article.title,
-            'content': article.text,
-            'authors': article.authors,
-            'published_date': article.publish_date.isoformat() if article.publish_date else None,
-            'scraped_at': datetime.now(timezone.utc).isoformat(),
-            'original_domain': original_domain,
-            'final_domain': final_domain
-        }
-
-        # Fallback for when newspaper3k fails to extract content properly
-        if not article.text or len(article.text) < 100:
-            logger.warning(
-                f"Article extraction may have failed for {article_url}. Using fallback methods")
-
-            # Try BeautifulSoup fallback
-            if response:
-                soup_content = _extract_with_soup(response.text)
-                if soup_content:
-                    article_data['content'] = soup_content
-                    logger.info(
-                        f"Successfully extracted content using BeautifulSoup fallback for {article_url}")
-
-            # If BeautifulSoup fallback didn't work, try Playwright
-            if (not article_data['content'] or len(article_data['content']) < 200):
-                playwright_content = _extract_with_playwright(
-                    article_url, user_agent)
-                if playwright_content:
-                    article_data['content'] = playwright_content
-
-        logger.info(f"Successfully extracted content from {article_url}")
-        return article_data
-
-    except Exception as e:
-        logger.error(f"Error extracting content from {article_url}: {e}")
-        return None
+    return None

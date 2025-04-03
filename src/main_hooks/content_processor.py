@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
-PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '50'))
+PARALLEL_WORKERS = int(os.environ.get('PARALLEL_WORKERS', '10'))
 PENDING_BATCH_SIZE = int(os.environ.get('PENDING_BATCH_SIZE', '250'))
 
 
@@ -79,7 +79,7 @@ def process_article_content(article: Dict, scraper, db_client) -> bool:
         return db_client.update_article_content(article['id'], None, error_msg)
 
 
-def process_pending_articles(scraper, db_client, batch_size: int = PENDING_BATCH_SIZE) -> int:
+def process_pending_articles(scraper, db_client, batch_size: int = PENDING_BATCH_SIZE, specific_urls: list = None) -> int:
     """
     Process pending articles and handle failures
 
@@ -87,19 +87,36 @@ def process_pending_articles(scraper, db_client, batch_size: int = PENDING_BATCH
         scraper: ScraperClient instance
         db_client: PostgreSQLClient instance
         batch_size: Number of pending articles to process
+        specific_urls: Optional list of specific URLs to process (overrides batch_size and pending check)
 
     Returns:
         Number of articles processed
     """
     try:
-        # Get pending articles
-        pending_articles = db_client.get_pending_articles(limit=batch_size)
+        # Get articles to process
+        if specific_urls:
+            # If specific URLs are provided, get their article data
+            pending_articles = []
+            for url in specific_urls:
+                article_data = db_client.get_article_by_url(url)
+                if article_data:
+                    pending_articles.append(article_data)
 
-        if not pending_articles:
-            logger.info("No pending articles to process")
-            return 0
+            if not pending_articles:
+                logger.info("No articles found with the specified URLs")
+                return 0
 
-        logger.info(f"Processing {len(pending_articles)} pending articles")
+            logger.info(
+                f"Processing {len(pending_articles)} specific articles")
+        else:
+            # Otherwise get regular pending articles
+            pending_articles = db_client.get_pending_articles(limit=batch_size)
+
+            if not pending_articles:
+                logger.info("No pending articles to process")
+                return 0
+
+            logger.info(f"Processing {len(pending_articles)} pending articles")
 
         # Process articles in parallel
         success_count = 0
