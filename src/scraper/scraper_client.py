@@ -82,21 +82,6 @@ class ScraperClient:
         logger.info(f"Discovering RSS feeds from {website_url}")
         domain = self._get_domain_from_url(website_url)
 
-        # Apply rate limiting with exponential backoff instead of continuous polling
-        backoff = 0.1
-        max_backoff = 2.0
-        while True:
-            if self.rate_limiter.acquire(domain):
-                break
-            # Use exponential backoff with a maximum wait time
-            time.sleep(min(backoff, max_backoff))
-            backoff *= 1.5
-            # If we've been waiting too long, log a warning
-            if backoff > max_backoff:
-                logger.warning(
-                    f"Long wait for rate limiter on domain: {domain}")
-
-        success = True
         try:
             # Store domain from website_url
             add_domain(self.unique_domains, website_url)
@@ -107,22 +92,11 @@ class ScraperClient:
             # Store domains from feed URLs
             add_domains_from_urls(self.unique_domains, feed_urls)
 
-            # Report success to rate limiter
-            self.rate_limiter.report_success(domain)
-
             return feed_urls
         except Exception as e:
-            success = False
-            # Report error to rate limiter to increase backoff
-            self.rate_limiter.report_error(domain)
             logger.error(
                 f"Error discovering RSS feeds from {website_url}: {e}")
             raise
-        finally:
-            # Release the rate limiter slot
-            if not success:
-                self.rate_limiter.report_error(domain)
-            self.rate_limiter.release(domain)
 
     def extract_rss_feed_content(self, feed_url: str, db_client=None, days: int = 2) -> List[Dict[str, str]]:
         """
@@ -139,21 +113,6 @@ class ScraperClient:
         logger.info(f"Extracting specific fields from RSS feed: {feed_url}")
         domain = self._get_domain_from_url(feed_url)
 
-        # Apply rate limiting with exponential backoff instead of continuous polling
-        backoff = 0.1
-        max_backoff = 2.0
-        while True:
-            if self.rate_limiter.acquire(domain):
-                break
-            # Use exponential backoff with a maximum wait time
-            time.sleep(min(backoff, max_backoff))
-            backoff *= 1.5
-            # If we've been waiting too long, log a warning
-            if backoff > max_backoff:
-                logger.warning(
-                    f"Long wait for rate limiter on domain: {domain}")
-
-        success = True
         try:
             # Store domain from feed_url
             add_domain(self.unique_domains, feed_url)
@@ -249,25 +208,13 @@ class ScraperClient:
                 logger.info(
                     f"Filtered out {existing_count} existing URLs from RSS feed")
 
-                # Report success to rate limiter
-                self.rate_limiter.report_success(domain)
-
                 return new_content
-
-            # Report success to rate limiter
-            self.rate_limiter.report_success(domain)
 
             return date_filtered_content
         except Exception as e:
-            success = False
-            # Report error to rate limiter to increase backoff
-            self.rate_limiter.report_error(domain)
             logger.error(
                 f"Error extracting content from RSS feed: {feed_url}: {e}")
             return []
-        finally:
-            # Release the rate limiter slot
-            self.rate_limiter.release(domain)
 
     def extract_article_content(self, article_url: str, referrer: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """

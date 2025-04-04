@@ -34,9 +34,6 @@ except ImportError:
     logging.warning(
         "Playwright not installed. JavaScript-heavy sites may not be properly scraped.")
 
-# A dictionary to track domains with old articles
-domains_with_old_articles = {}  # domain -> count of old articles
-
 # List of blocked domains to skip
 blocked_domains: List[str] = [
     "bloomberg.com",
@@ -45,13 +42,88 @@ blocked_domains: List[str] = [
     "nytimes.com",
     "economist.com",
     "thehill.com",
+    "businessinsider.com",
     "axion.com",
     "politico.com",
 ]
 
 # Constants for content validation
-MIN_CONTENT_CHARS = 800
-MIN_CONTENT_WORDS = 100
+MIN_CONTENT_CHARS = 800    # Minimum characters for a full article
+MIN_CONTENT_WORDS = 100    # Minimum words for a full article
+MIN_ELEMENT_CONTENT_CHARS = 200  # Minimum chars for a content element
+MIN_PARAGRAPH_CHARS = 20   # Minimum chars for a valid paragraph
+# Minimum chars for a substantial paragraph
+MIN_SUBSTANTIAL_PARAGRAPH_CHARS = 50
+
+# Content validation thresholds
+
+
+class ContentThreshold:
+    """Content validation thresholds for different content types"""
+    FULL_ARTICLE = MIN_CONTENT_CHARS  # Full article validation
+    # Content blocks (article, main, sections)
+    CONTENT_ELEMENT = MIN_ELEMENT_CONTENT_CHARS
+    PARAGRAPH = MIN_PARAGRAPH_CHARS  # Regular paragraphs
+    SUBSTANTIAL_PARAGRAPH = MIN_SUBSTANTIAL_PARAGRAPH_CHARS  # More important paragraphs
+
+
+def _make_http_request(url: str, custom_user_agent: str = None, custom_referrer: str = None, extra_headers: Dict[str, str] = None) -> Optional[Any]:
+    """
+    Make an HTTP request with standardized headers and error handling.
+
+    Args:
+        url: The URL to request
+        custom_user_agent: Optional specific user agent to use (if None, a random one is selected)
+        custom_referrer: Optional referrer URL (if None, a generic one may be used)
+        extra_headers: Optional additional headers to include
+
+    Returns:
+        Response object or None if request failed
+    """
+    # Get realistic headers with optional custom referrer
+    headers = get_realistic_headers(url, referrer=custom_referrer)
+
+    # Add or override with custom user agent if provided
+    if custom_user_agent:
+        headers["User-Agent"] = custom_user_agent
+
+    # Add any extra headers
+    if extra_headers:
+        headers.update(extra_headers)
+
+    # Make the request with proper error handling
+    try:
+        logger.debug(f"Making HTTP request to {url}")
+        return make_request(url, headers=headers)
+    except Exception as e:
+        logger.error(f"HTTP request failed for {url}: {e}")
+        return None
+
+
+def _is_blocked_domain(url_or_domain: str) -> bool:
+    """
+    Check if a URL or domain is in the blocked domains list
+
+    Args:
+        url_or_domain: Either a full URL or just a domain string
+
+    Returns:
+        True if the domain is blocked, False otherwise
+    """
+    # Extract domain if a full URL was passed
+    domain = url_or_domain
+    if '://' in url_or_domain:
+        domain = urlparse(url_or_domain).netloc.lower()
+    else:
+        domain = domain.lower()
+
+    # Check against blocked domains list
+    for blocked_domain in blocked_domains:
+        if blocked_domain in domain:
+            logger.info(f"Blocked domain detected: {domain}")
+            return True
+
+    return False
 
 
 def _follow_redirect(url: str) -> Tuple[str, str]:
@@ -77,8 +149,8 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
         if "biztoc.com" in domain:
             logger.info(
                 "Detected BizToc URL, looking for original article link")
-            headers = get_realistic_headers(url)
-            response = make_request(url, headers=headers)
+
+            response = _make_http_request(url)
 
             if response and response.text:
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -87,7 +159,8 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
                 url_box = soup.find('a', class_='urlbox drops text-mono')
                 if url_box and url_box.get('href'):
                     source_url = url_box.get('href')
-                    logger.info(f"Found original URL in urlbox: {source_url}")
+                    logger.info(
+                        f"Found original URL in urlbox: {source_url} ")
                     final_domain = urlparse(source_url).netloc.lower()
                     return source_url, final_domain
 
@@ -99,7 +172,7 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
                     if parent_link and parent_link.get('href'):
                         source_url = parent_link.get('href')
                         logger.info(
-                            f"Found original URL in urlbox span parent: {source_url}")
+                            f"Found original URL in urlbox span parent: {source_url} ")
                         final_domain = urlparse(source_url).netloc.lower()
                         return source_url, final_domain
 
@@ -111,10 +184,10 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
         elif "news.google.com" in domain and "/articles/" in url:
             logger.info("Detected Google News redirect URL")
             # Google News needs special handling for redirect extraction
-            headers = get_realistic_headers(url)
-            headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            custom_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-            response = make_request(url, headers=headers)
+            response = _make_http_request(
+                url, custom_user_agent=custom_user_agent)
 
             if response and response.status_code in (301, 302, 303, 307, 308):
                 redirect_url = response.headers.get('Location')
@@ -134,7 +207,7 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
                         if href.startswith('./'):
                             href = f"https://news.google.com{href[1:]}"
                         logger.info(
-                            f"Found redirect link in Google News page: {href}")
+                            f"Found redirect link in Google News page: {href} ")
                         final_domain = urlparse(href).netloc.lower()
                         return href, final_domain
 
@@ -149,8 +222,7 @@ def _follow_redirect(url: str) -> Tuple[str, str]:
                         return href, final_domain
 
         # General redirect handling for other URLs
-        headers = get_realistic_headers(url)
-        response = make_request(url, headers=headers)
+        response = _make_http_request(url)
 
         # Check if we got a redirect in the response history
         if response and response.history:
@@ -189,17 +261,9 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
     domain = urlparse(article_url).netloc
     is_biztoc = "biztoc.com" in domain.lower()
 
-    # Known problematic sites that need special handling
-    problematic_sites = {
-        'economist.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True},
-        'ft.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
-        'wsj.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True},
-        'nytimes.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True}
-    }
-
-    # Get site-specific settings
-    site_config = next((cfg for site, cfg in problematic_sites.items() if site in domain),
-                       {'wait': 'load', 'timeout': 5000, 'stealth': False})
+    # Default configuration for all sites
+    site_config = {'wait': 'domcontentloaded',
+                   'timeout': 10000, 'stealth': False}
 
     for attempt, delay in enumerate([0] + retry_delays):
         try:
@@ -209,15 +273,7 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
             # Browser launch options
             browser_args = []
 
-            # Add stealth mode for problematic sites
-            if site_config['stealth']:
-                browser_args = [
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-site-isolation-trials'
-                ]
-                logger.info(f"Using stealth mode for {domain}")
-
+            # No need for stealth mode since we're not handling problematic sites
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=browser_args)
 
@@ -240,45 +296,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                     **device if 'iPhone' not in user_agent else {},
                     locale='en-US'
                 )
-
-                # Apply stealth mode JS if needed
-                if site_config['stealth']:
-                    # Execute stealth JS to avoid detection
-                    context.add_init_script("""
-                    () => {
-                        // Pass webdriver check
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => false,
-                        });
-                        
-                        // Overwrite permissions
-                        const originalQuery = window.navigator.permissions.query;
-                        window.navigator.permissions.query = (parameters) => (
-                            parameters.name === 'notifications' ?
-                                Promise.resolve({ state: Notification.permission }) :
-                                originalQuery(parameters)
-                        );
-                        
-                        // Overwrite plugins
-                        Object.defineProperty(navigator, 'plugins', {
-                            get: () => [
-                                {
-                                    0: {type: "application/pdf"},
-                                    description: "Portable Document Format",
-                                    filename: "internal-pdf-viewer",
-                                    length: 1,
-                                    name: "Chrome PDF Plugin"
-                                }
-                            ],
-                        });
-                        
-                        // Overwrite user agent
-                        const userAgent = window.navigator.userAgent;
-                        Object.defineProperty(navigator, 'userAgent', {
-                            get: () => userAgent.replace("Headless", ""),
-                        });
-                    }
-                    """)
 
                 # Block unnecessary resource types for better performance
                 context.route('**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,otf,mp4,webm,ogg,mp3,wav}',
@@ -338,12 +355,20 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                         if original_url:
                             logger.info(
                                 f"Found original URL on BizToc: {original_url}")
+
+                            # Check if the redirected URL is in blocked domains before navigating
+                            if _is_blocked_domain(original_url):
+                                logger.info(
+                                    f"Skipping blocked domain after BizToc redirect: {original_url}")
+                                browser.close()
+                                return None
+
                             # Update the article URL to the original source
                             article_url = original_url
 
                             # Now navigate to the original article
                             logger.info(
-                                f"Navigating to original article: {article_url}")
+                                f"Navigating to original article: {article_url} ")
                             page.goto(article_url, timeout=site_config['timeout'],
                                       wait_until=site_config['wait'])
                         else:
@@ -553,11 +578,9 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
         Dictionary containing article details or None if extraction fails
     """
     # Check if domain is in blocked list
-    domain = urlparse(article_url).netloc.lower()
-    for blocked_domain in blocked_domains:
-        if blocked_domain in domain:
-            logger.info(f"Skipping blocked domain: {domain} ({article_url})")
-            return None
+    if _is_blocked_domain(article_url):
+        logger.info(f"Skipping blocked domain: {article_url}")
+        return None
 
     # Maximum retries for short content detection
     max_retries = 3
@@ -595,11 +618,10 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                 article_url, final_domain = _follow_redirect(article_url)
 
                 # Check if redirected URL is in blocked domains
-                for blocked_domain in blocked_domains:
-                    if blocked_domain in final_domain:
-                        logger.info(
-                            f"Skipping blocked domain after redirect: {final_domain} ({article_url})")
-                        return None
+                if _is_blocked_domain(final_domain):
+                    logger.info(
+                        f"Skipping blocked domain after redirect: {final_domain} ({article_url})")
+                    return None
 
                 if article_url != original_url:
                     # Update domain to the one we actually redirected to
@@ -619,12 +641,6 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             # Get domain from final URL to track old articles
             domain = urlparse(article_url).netloc
 
-            # Skip if we've already found 3 old articles from this domain
-            if domain in domains_with_old_articles and domains_with_old_articles[domain] >= 3:
-                logger.info(
-                    f"Skipping domain {domain} because too many old articles were found")
-                return None
-
             # Use realistic referrer
             if not referrer:
                 referrer = get_referrer()
@@ -636,15 +652,12 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
 
             article = newspaper.Article(article_url)
 
-            # Instead of using article.download(), use our custom request method
-            headers = get_realistic_headers(article_url)
-            headers["Referer"] = referrer
-
             # Add a random delay to mimic human behavior before downloading
             random_delay()
+            # Use our standard HTTP request method with proper headers
+            response = _make_http_request(
+                article_url, custom_user_agent=user_agent, custom_referrer=referrer)
 
-            # Use our custom method for downloading
-            response = make_request(article_url, headers=headers)
             if response:
                 article.download(input_html=response.text)
             else:
@@ -676,19 +689,8 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                     )
 
                 if article_date < three_days_ago:
-                    # Increment the count of old articles for this domain
-                    if domain in domains_with_old_articles:
-                        domains_with_old_articles[domain] += 1
-                    else:
-                        domains_with_old_articles[domain] = 1
-
                     logger.info(
-                        f"Found old article from {domain} (count: {domains_with_old_articles[domain]})")
-
-                    # If we've found 3 old articles, log the info
-                    if domains_with_old_articles[domain] >= 3:
-                        logger.info(
-                            f"Will stop fetching from {domain} due to old articles")
+                        f"Found old article from {domain}")
 
             # Create article data with additional browser-like metadata
             article_data = {
@@ -717,7 +719,7 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                     if soup_content and not _is_content_too_short(soup_content):
                         article_data['content'] = soup_content
                         logger.info(
-                            f"Successfully extracted content using BeautifulSoup fallback for {article_url}")
+                            f"Successfully extracted content using BeautifulSoup fallback for {article_url} ")
                         fallback_used = True
                     elif soup_content:
                         logger.warning(
