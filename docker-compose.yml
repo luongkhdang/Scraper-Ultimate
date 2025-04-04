@@ -19,6 +19,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - app_network
 
   pgadmin:
     image: dpage/pgadmin4
@@ -36,6 +38,8 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     restart: unless-stopped
+    networks:
+      - app_network
 
   scraper:
     build: .
@@ -51,6 +55,34 @@ services:
       DB_NAME: news-db
       DB_USER: postgres
       DB_PASSWORD: postgres
+    networks:
+      - app_network
+
+  api:
+    build:
+      context: .
+      dockerfile: src/api/Dockerfile
+    container_name: news-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: news-db
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
 
 volumes:
   postgres_data:
