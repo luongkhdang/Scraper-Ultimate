@@ -9,7 +9,7 @@ Related Files:
 - src/scraper/scraper_hooks/url_extractor.py: Provides URLs for this module to process
 """
 import newspaper
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, List
 import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -36,6 +36,18 @@ except ImportError:
 
 # A dictionary to track domains with old articles
 domains_with_old_articles = {}  # domain -> count of old articles
+
+# List of blocked domains to skip
+blocked_domains: List[str] = [
+    "bloomberg.com",
+    "wsj.com",
+    "ft.com",
+    "nytimes.com",
+    "economist.com",
+    "thehill.com",
+    "axion.com",
+    "politico.com",
+]
 
 # Constants for content validation
 MIN_CONTENT_CHARS = 800
@@ -179,15 +191,15 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
 
     # Known problematic sites that need special handling
     problematic_sites = {
-        'economist.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
+        'economist.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True},
         'ft.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
-        'wsj.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True},
-        'nytimes.com': {'wait': 'domcontentloaded', 'timeout': 30000, 'stealth': True}
+        'wsj.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True},
+        'nytimes.com': {'wait': 'domcontentloaded', 'timeout': 5000, 'stealth': True}
     }
 
     # Get site-specific settings
     site_config = next((cfg for site, cfg in problematic_sites.items() if site in domain),
-                       {'wait': 'load', 'timeout': 45000, 'stealth': False})
+                       {'wait': 'load', 'timeout': 5000, 'stealth': False})
 
     for attempt, delay in enumerate([0] + retry_delays):
         try:
@@ -540,6 +552,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
     Returns:
         Dictionary containing article details or None if extraction fails
     """
+    # Check if domain is in blocked list
+    domain = urlparse(article_url).netloc.lower()
+    for blocked_domain in blocked_domains:
+        if blocked_domain in domain:
+            logger.info(f"Skipping blocked domain: {domain} ({article_url})")
+            return None
+
     # Maximum retries for short content detection
     max_retries = 3
 
@@ -574,6 +593,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             if is_redirect_url:
                 # Follow redirects to get the actual article URL
                 article_url, final_domain = _follow_redirect(article_url)
+
+                # Check if redirected URL is in blocked domains
+                for blocked_domain in blocked_domains:
+                    if blocked_domain in final_domain:
+                        logger.info(
+                            f"Skipping blocked domain after redirect: {final_domain} ({article_url})")
+                        return None
 
                 if article_url != original_url:
                     # Update domain to the one we actually redirected to
