@@ -17,12 +17,14 @@ import time
 import random
 import os
 import datetime
+import asyncio
 from pathlib import Path
 import tempfile
+import concurrent.futures
 
 # Check if Playwright is available
 try:
-    from playwright.sync_api import sync_playwright
+    from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -280,7 +282,7 @@ REFERRERS = [
 # Function to handle slow request loading
 
 
-def slow_request_handler(route):
+async def slow_request_handler(route):
     """Handle requests with random delays to simulate a slower connection"""
     try:
         # Only delay specific resource types to avoid excessive slowdowns
@@ -288,7 +290,7 @@ def slow_request_handler(route):
 
         # Don't delay the main document to avoid navigation timeouts
         if resource_type == 'document':
-            route.continue_()
+            await route.continue_()
             return
 
         # Different delay strategies for different resource types
@@ -304,19 +306,19 @@ def slow_request_handler(route):
 
         # Apply the delay
         if delay > 0:
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
         # Continue with the request after delay
-        route.continue_()
+        await route.continue_()
     except Exception as e:
         # If any error occurs, make sure to continue the request to avoid hanging
         logger.warning(f"Error in slow_request_handler: {e}")
         try:
-            route.continue_()
+            await route.continue_()
         except:
             # If continue fails, try to abort to prevent hanging
             try:
-                route.abort()
+                await route.abort()
             except:
                 pass
 
@@ -356,8 +358,17 @@ def extract_with_special_strategy(article_url: str, user_agent: str) -> Optional
     # Initialize SpecialStrategyExtractor class
     extractor = SpecialStrategyExtractor()
 
-    # Use the extractor to get content
-    return extractor.extract(article_url, user_agent)
+    # This is a simplified wrapper around the async extract method
+    # The actual asyncio.run handling is now done in content_extractor.py
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(extractor.extract(article_url, user_agent))
+    except Exception as e:
+        logger.error(f"Error in extract_with_special_strategy: {e}")
+        return None
+    finally:
+        loop.close()
 
 
 class SpecialStrategyExtractor:
@@ -367,7 +378,7 @@ class SpecialStrategyExtractor:
         """Initialize the extractor with configuration options"""
         pass
 
-    def extract(self, article_url: str, user_agent: str) -> Optional[Tuple[str, str]]:
+    async def extract(self, article_url: str, user_agent: str) -> Optional[Tuple[str, str]]:
         """
         Main extraction method for retrieving content from paywalled/restricted sites
 
@@ -400,7 +411,7 @@ class SpecialStrategyExtractor:
                 # Rest of the extraction logic will be implemented here
                 # ... (browser launching, navigation, content extraction)
 
-                with sync_playwright() as p:
+                async with async_playwright() as p:
                     # Launch browser with anti-detection measures
                     browser = None
                     context = None
@@ -416,7 +427,7 @@ class SpecialStrategyExtractor:
                         ]
 
                         # Launch with additional configurations for blocked domains
-                        browser = p.chromium.launch(
+                        browser = await p.chromium.launch(
                             headless=True,
                             args=browser_args
                         )
@@ -431,7 +442,7 @@ class SpecialStrategyExtractor:
                             logger.info(
                                 f"Using enhanced stealth mode for {domain}")
                             # Use even more radical browser launch options for these sites
-                            browser.close()  # Close the previous browser
+                            await browser.close()  # Close the previous browser
 
                             # More extensive anti-detection flags
                             enhanced_browser_args = [
@@ -467,7 +478,7 @@ class SpecialStrategyExtractor:
                             # Launch with enhanced stealth mode using persistent context
                             try:
                                 # Try using persistent context for better anti-detection
-                                browser = p.chromium.launch_persistent_context(
+                                browser = await p.chromium.launch_persistent_context(
                                     user_data_dir=user_data_dir,
                                     headless=True,  # Always use headless mode to avoid XServer errors
                                     args=enhanced_browser_args
@@ -479,7 +490,7 @@ class SpecialStrategyExtractor:
                                 logger.warning(
                                     f"Failed to launch persistent context: {e}, falling back to regular launch")
                                 # Fall back to regular launch without user data dir
-                                browser = p.chromium.launch(
+                                browser = await p.chromium.launch(
                                     headless=True,  # Always use headless mode to avoid XServer errors
                                     args=enhanced_browser_args
                                 )
@@ -526,10 +537,10 @@ class SpecialStrategyExtractor:
                                     context_options['viewport']['height'] = height + \
                                         random.randint(1, 3)
 
-                            context = browser.new_context(**context_options)
+                            context = await browser.new_context(**context_options)
 
                         # Set up page with anti-detection measures
-                        page = context.new_page()
+                        page = await context.new_page()
 
                         # Navigate to the page with appropriate strategy for the domain
                         # ... (navigation logic, content extraction)
@@ -538,11 +549,11 @@ class SpecialStrategyExtractor:
                         # For now, let's implement a simple direct navigation
                         try:
                             logger.info(f"Navigating to {article_url}")
-                            page.goto(article_url, timeout=site_config['timeout'],
-                                      wait_until=site_config['wait'])
+                            await page.goto(article_url, timeout=site_config['timeout'],
+                                            wait_until=site_config['wait'])
 
                             # Wait for content to load
-                            page.wait_for_timeout(5000)
+                            await page.wait_for_timeout(5000)
 
                             # Execute DOM manipulation if needed based on site specific strategy
                             site_strategy = None
@@ -558,11 +569,11 @@ class SpecialStrategyExtractor:
                                 if "dom_script" in site_strategy:
                                     logger.info(
                                         "Applying site-specific DOM script")
-                                    page.evaluate(site_strategy["dom_script"])
+                                    await page.evaluate(site_strategy["dom_script"])
 
                                 # Handle consent dialogs that might block content
                                 try:
-                                    self._handle_consent_dialogs(page)
+                                    await self._handle_consent_dialogs(page)
                                 except Exception as e:
                                     logger.warning(
                                         f"Error handling consent dialogs: {e}")
@@ -583,16 +594,17 @@ class SpecialStrategyExtractor:
                             content = ""
                             for selector in content_selectors:
                                 try:
-                                    elements = page.query_selector_all(
+                                    elements = await page.query_selector_all(
                                         selector)
                                     if elements:
                                         for element in elements:
-                                            paragraphs = element.query_selector_all(
+                                            paragraphs = await element.query_selector_all(
                                                 'p')
                                             if paragraphs and len(paragraphs) > 2:
                                                 paragraph_texts = []
                                                 for p in paragraphs:
-                                                    text = p.text_content().strip()
+                                                    text = await p.text_content()
+                                                    text = text.strip()
                                                     if text and len(text) > 20:
                                                         paragraph_texts.append(
                                                             text)
@@ -604,7 +616,8 @@ class SpecialStrategyExtractor:
                                                     break
                                             else:
                                                 # If no paragraphs, try direct text content
-                                                text = element.text_content().strip()
+                                                text = await element.text_content()
+                                                text = text.strip()
                                                 if text and len(text) > 200:
                                                     content = text
                                                     break
@@ -628,19 +641,19 @@ class SpecialStrategyExtractor:
                         # Cleanup resources
                         if page:
                             try:
-                                page.close()
+                                await page.close()
                             except:
                                 pass
 
                         if context and not using_persistent_context:
                             try:
-                                context.close()
+                                await context.close()
                             except:
                                 pass
 
                         if browser and not using_persistent_context:
                             try:
-                                browser.close()
+                                await browser.close()
                             except:
                                 pass
 
@@ -654,7 +667,7 @@ class SpecialStrategyExtractor:
         # If all attempts failed, return None
         return None
 
-    def _handle_consent_dialogs(self, page):
+    async def _handle_consent_dialogs(self, page):
         """Handle common cookie consent and GDPR dialogs that might block content."""
         # List of common consent button selectors across different sites
         consent_selectors = [
@@ -691,7 +704,7 @@ class SpecialStrategyExtractor:
         for selector in consent_selectors:
             try:
                 # Check if element exists and is visible
-                is_visible = page.evaluate(f"""
+                is_visible = await page.evaluate(f"""
                     () => {{
                         const element = document.querySelector('{selector}');
                         if (!element) return false;
@@ -703,10 +716,10 @@ class SpecialStrategyExtractor:
 
                 if is_visible:
                     logger.info(f"Found consent dialog element: {selector}")
-                    page.click(selector)
+                    await page.click(selector)
                     logger.info(f"Clicked consent button: {selector}")
                     # Wait a moment for the dialog to disappear
-                    page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(1500)
                     return True
             except Exception as e:
                 logger.debug(
@@ -715,7 +728,7 @@ class SpecialStrategyExtractor:
         # If specific selectors didn't work, try a general approach with JavaScript
         try:
             # Try to find and click any visible buttons with text related to accepting cookies
-            clicked = page.evaluate("""
+            clicked = await page.evaluate("""
                 () => {
                     // Find buttons with common acceptance text
                     const buttonTexts = ['accept', 'agree', 'allow', 'consent', 'ok', 'continue'];
@@ -753,7 +766,7 @@ class SpecialStrategyExtractor:
             if clicked:
                 logger.info(
                     "Clicked a generic consent button using JavaScript approach")
-                page.wait_for_timeout(1500)
+                await page.wait_for_timeout(1500)
                 return True
         except Exception as e:
             logger.debug(
@@ -762,7 +775,7 @@ class SpecialStrategyExtractor:
         # As a last resort, try to remove overlay elements that might be blocking content
         try:
             # Remove common overlay elements
-            removed = page.evaluate("""
+            removed = await page.evaluate("""
                 () => {
                     // Common overlay selectors
                     const overlaySelectors = [

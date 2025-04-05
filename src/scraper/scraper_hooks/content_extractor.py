@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 import re
 import time
+import asyncio
+import concurrent.futures
 
 # Import local modules
 from .utils import make_request, get_random_user_agent, get_realistic_headers, random_delay, get_referrer
@@ -54,6 +56,7 @@ blocked_domains: List[str] = [
     "businessinsider.com",
     "axion.com",
     "politico.com",
+    "reuter.com"
 ]
 
 # Constants for content validation
@@ -274,8 +277,52 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                     logger.info(
                                         f"Attempting to use special strategy for blocked domain from BizToc: {original_url}")
                                     try:
-                                        special_result = extract_with_special_strategy(
-                                            original_url, user_agent)
+                                        # Import additional modules needed for async handling
+                                        try:
+                                            # Determine if we're in an event loop
+                                            try:
+                                                asyncio.get_running_loop()
+                                                in_event_loop = True
+                                            except RuntimeError:
+                                                in_event_loop = False
+
+                                            # Import the special strategy directly
+                                            from .strategies.special_strategy import SpecialStrategyExtractor
+
+                                            # Initialize the extractor
+                                            extractor = SpecialStrategyExtractor()
+
+                                            # Handle running within or outside an event loop
+                                            if in_event_loop:
+                                                logger.info(
+                                                    "Running in existing event loop, using thread executor")
+                                                with concurrent.futures.ThreadPoolExecutor() as executor:
+                                                    future = executor.submit(lambda: asyncio.run(
+                                                        extractor.extract(original_url, user_agent)))
+                                                    try:
+                                                        special_result = future.result(
+                                                            timeout=60)
+                                                    except concurrent.futures.TimeoutError:
+                                                        logger.error(
+                                                            "Special strategy timed out after 60 seconds")
+                                                        special_result = None
+                                                    except Exception as e:
+                                                        logger.error(
+                                                            f"Error in special strategy thread: {e}")
+                                                        special_result = None
+                                            else:
+                                                logger.info(
+                                                    "No event loop detected, using asyncio.run directly")
+                                                special_result = asyncio.run(
+                                                    extractor.extract(original_url, user_agent))
+                                        except Exception as e:
+                                            logger.error(
+                                                f"Error setting up async execution: {e}")
+                                            # Fall back to the standard import
+                                            from .strategies.special_strategy import extract_with_special_strategy
+                                            special_result = extract_with_special_strategy(
+                                                original_url, user_agent)
+
                                         if special_result:
                                             content, special_final_url = special_result
                                             article_data = {
@@ -350,8 +397,52 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                     logger.info(
                                         f"Attempting to use special strategy for blocked domain from Google News: {redirected_url}")
                                     try:
-                                        special_result = extract_with_special_strategy(
-                                            redirected_url, user_agent)
+                                        # Import additional modules needed for async handling
+                                        try:
+                                            # Determine if we're in an event loop
+                                            try:
+                                                asyncio.get_running_loop()
+                                                in_event_loop = True
+                                            except RuntimeError:
+                                                in_event_loop = False
+
+                                            # Import the special strategy directly
+                                            from .strategies.special_strategy import SpecialStrategyExtractor
+
+                                            # Initialize the extractor
+                                            extractor = SpecialStrategyExtractor()
+
+                                            # Handle running within or outside an event loop
+                                            if in_event_loop:
+                                                logger.info(
+                                                    "Running in existing event loop, using thread executor")
+                                                with concurrent.futures.ThreadPoolExecutor() as executor:
+                                                    future = executor.submit(lambda: asyncio.run(
+                                                        extractor.extract(redirected_url, user_agent)))
+                                                    try:
+                                                        special_result = future.result(
+                                                            timeout=60)
+                                                    except concurrent.futures.TimeoutError:
+                                                        logger.error(
+                                                            "Special strategy timed out after 60 seconds")
+                                                        special_result = None
+                                                    except Exception as e:
+                                                        logger.error(
+                                                            f"Error in special strategy thread: {e}")
+                                                        special_result = None
+                                            else:
+                                                logger.info(
+                                                    "No event loop detected, using asyncio.run directly")
+                                                special_result = asyncio.run(
+                                                    extractor.extract(redirected_url, user_agent))
+                                        except Exception as e:
+                                            logger.error(
+                                                f"Error setting up async execution: {e}")
+                                            # Fall back to the standard import
+                                            from .strategies.special_strategy import extract_with_special_strategy
+                                            special_result = extract_with_special_strategy(
+                                                redirected_url, user_agent)
+
                                         if special_result:
                                             content, special_final_url = special_result
                                             article_data = {
@@ -414,8 +505,52 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                             logger.info(
                                 f"Attempting to use special strategy for blocked domain after redirect: {current_url}")
                             try:
-                                special_result = extract_with_special_strategy(
-                                    current_url, user_agent)
+                                # Import additional modules needed for async handling
+                                try:
+                                    # Determine if we're in an event loop
+                                    try:
+                                        asyncio.get_running_loop()
+                                        in_event_loop = True
+                                    except RuntimeError:
+                                        in_event_loop = False
+
+                                    # Import the special strategy directly
+                                    from .strategies.special_strategy import SpecialStrategyExtractor
+
+                                    # Initialize the extractor
+                                    extractor = SpecialStrategyExtractor()
+
+                                    # Handle running within or outside an event loop
+                                    if in_event_loop:
+                                        logger.info(
+                                            "Running in existing event loop, using thread executor")
+                                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                                            future = executor.submit(lambda: asyncio.run(
+                                                extractor.extract(current_url, user_agent)))
+                                            try:
+                                                special_result = future.result(
+                                                    timeout=60)
+                                            except concurrent.futures.TimeoutError:
+                                                logger.error(
+                                                    "Special strategy timed out after 60 seconds")
+                                                special_result = None
+                                            except Exception as e:
+                                                logger.error(
+                                                    f"Error in special strategy thread: {e}")
+                                                special_result = None
+                                    else:
+                                        logger.info(
+                                            "No event loop detected, using asyncio.run directly")
+                                        special_result = asyncio.run(
+                                            extractor.extract(current_url, user_agent))
+                                except Exception as e:
+                                    logger.error(
+                                        f"Error setting up async execution: {e}")
+                                    # Fall back to the standard import
+                                    from .strategies.special_strategy import extract_with_special_strategy
+                                    special_result = extract_with_special_strategy(
+                                        current_url, user_agent)
+
                                 if special_result:
                                     content, special_final_url = special_result
                                     article_data = {
@@ -596,9 +731,48 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             # Get realistic user agent for the special strategy
             user_agent = get_random_user_agent()
 
-            # Use special strategy to extract content
-            special_result = extract_with_special_strategy(
-                article_url, user_agent)
+            try:
+                # Determine if we're in an event loop
+                try:
+                    asyncio.get_running_loop()
+                    in_event_loop = True
+                except RuntimeError:
+                    in_event_loop = False
+
+                # Import the special strategy directly
+                from .strategies.special_strategy import SpecialStrategyExtractor
+
+                # Initialize the extractor
+                extractor = SpecialStrategyExtractor()
+
+                # Handle running within or outside an event loop
+                if in_event_loop:
+                    logger.info(
+                        "Running in existing event loop, using thread executor")
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(lambda: asyncio.run(
+                            extractor.extract(article_url, user_agent)))
+                        try:
+                            special_result = future.result(timeout=60)
+                        except concurrent.futures.TimeoutError:
+                            logger.error(
+                                "Special strategy timed out after 60 seconds")
+                            return None
+                        except Exception as e:
+                            logger.error(
+                                f"Error in special strategy thread: {e}")
+                            return None
+                else:
+                    logger.info(
+                        "No event loop detected, using asyncio.run directly")
+                    special_result = asyncio.run(
+                        extractor.extract(article_url, user_agent))
+            except Exception as e:
+                logger.error(f"Error setting up async execution: {e}")
+                # Fall back to the standard import
+                from .strategies.special_strategy import extract_with_special_strategy
+                special_result = extract_with_special_strategy(
+                    article_url, user_agent)
 
             if special_result:
                 content, final_url = special_result

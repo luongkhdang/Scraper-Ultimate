@@ -1,6 +1,6 @@
 {
-  "total_failed_feeds": 2,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=5, tm_hour=1, tm_min=38, tm_sec=46, tm_wday=5, tm_yday=95, tm_isdst=0)",
+  "total_failed_feeds": 3,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=5, tm_hour=3, tm_min=26, tm_sec=52, tm_wday=5, tm_yday=95, tm_isdst=0)",
   "feeds": {
     "https://rss.nytimes.com/services/xml/rss/nyt/US.xml": {
       "error": "No articles extracted",
@@ -9,6 +9,10 @@
     "https://www.economist.com/asia/rss.xml": {
       "error": "No articles extracted",
       "timestamp": "2025-04-05 01:28:19.345188"
+    },
+    "http://feeds.benzinga.com/benzinga/trading-ideas": {
+      "error": "Exceeded maximum timeout of 60s",
+      "timestamp": "2025-04-05 03:26:52.%f"
     }
   }
 }

@@ -1,6 +1,5 @@
 https://biztoc.com/feed
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
-https://thehill.com/policy/feed/
 https://www.benzinga.com/general/politics/feed
 http://feeds.benzinga.com/benzinga/trading-ideas
 https://www.latimes.com/rss2.0.xml
@@ -25,7 +24,6 @@ https://www.businesstimes.com.sg/rss/banking-finance
 https://prod-qt-images.s3.amazonaws.com/production/bloombergquint/feed.xml
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=stock
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=power
-https://thehill.com/business/feed/
 https://www.benzinga.com/markets/feed
 http://feeds.benzinga.com/benzinga/markets/options
 https://www.latimes.com/rss2.0.xml
@@ -43,13 +41,11 @@ https://nypost.com/us-news/feed/
 https://feeds.feedburner.com/hackread
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=economy
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=war
-https://thehill.com/opinion/feed/
 https://www.latimes.com/politics/rss2.0.xml
 https://www.economist.com/china/rss.xml
 https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml
 https://feeds.washingtonpost.com/rss/rss_the-fix
 https://www.theguardian.com/us/business/rss
-https://thehill.com/news/feed/
 http://feeds.benzinga.com/benzinga
 https://www.economist.com/united-states/rss.xml
 https://www.usnews.com/rss/the-report
