@@ -15,6 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict
 import os
+from urllib.parse import urlparse
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -43,18 +44,48 @@ def process_article_content(article: Dict, scraper, db_client) -> bool:
         article_url = article['url']
         original_domain = article['domain']
 
+        # Check if this is a Google News URL
+        is_google_news = 'news.google.com' in original_domain
+        if is_google_news:
+            logger.info(
+                f"Processing Google News URL: {article_url} (ID: {article_id})")
+
         # Extract article content
         content_data = scraper.extract_article_content(article_url)
 
         if content_data and content_data.get('content'):
             # Check if we have final_domain information from a redirect
             final_domain = content_data.get('final_domain')
+            final_url = content_data.get('final_url')
+
+            # Log available keys in content_data for debugging
+            if is_google_news:
+                logger.debug(f"Content data keys: {list(content_data.keys())}")
+
+            # Debug logs to trace domain information
+            logger.debug(f"Article {article_id} extraction complete:")
+            logger.debug(f"  Original domain: {original_domain}")
+            logger.debug(f"  Final domain from content: {final_domain}")
+
+            # Fallback for Google News URLs if final_domain is missing but we have final_url
+            if is_google_news and not final_domain and final_url:
+                try:
+                    computed_final_domain = urlparse(final_url).netloc.lower()
+                    if computed_final_domain and computed_final_domain != original_domain:
+                        logger.warning(
+                            f"Using computed final_domain from final_url: {computed_final_domain}")
+                        final_domain = computed_final_domain
+                except Exception as e:
+                    logger.error(f"Error computing domain from final_url: {e}")
 
             # Update the domain in the database if this was redirected
-            # (especially for news.google.com and other redirect services)
+            # (from news.google.com, biztoc.com, or any other URL that redirects)
             if final_domain and final_domain != original_domain:
                 logger.info(
                     f"Domain updated for article {article_id}: {original_domain} -> {final_domain}")
+                if final_url:
+                    logger.info(
+                        f"URL updated: {article_url} -> {final_url}")
 
                 # Update article with content and the new domain
                 return db_client.update_article_content(
@@ -64,6 +95,15 @@ def process_article_content(article: Dict, scraper, db_client) -> bool:
                     domain=final_domain
                 )
             else:
+                if is_google_news:
+                    # More detailed diagnostic info
+                    logger.warning(
+                        f"Google News URL did not have final_domain in content_data. Domain not updated. URL: {article_url}")
+                    logger.warning(
+                        f"Content keys available: {list(content_data.keys())}")
+                    if 'url' in content_data:
+                        logger.warning(f"Content URL: {content_data['url']}")
+
                 # Update article with content only
                 return db_client.update_article_content(article_id, content_data['content'])
         else:

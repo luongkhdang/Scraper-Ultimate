@@ -1,5 +1,11 @@
 {
   "unique_domains": [
-    "biztoc.com"
+    "feeds.businessinsider.com",
+    "feeds.content.dowjones.io",
+    "rss.nytimes.com",
+    "www.businessinsider.com",
+    "www.economist.com",
+    "www.marketwatch.com",
+    "www.nytimes.com"
   ]
 }

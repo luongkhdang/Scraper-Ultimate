@@ -229,6 +229,7 @@ class ScraperClient:
         """
         logger.info(f"Extracting content from {article_url}")
         domain = self._get_domain_from_url(article_url)
+        original_domain = domain  # Store for later use
 
         # Special handling for Google News URLs
         is_google_news = 'news.google.com' in domain
@@ -248,6 +249,7 @@ class ScraperClient:
             # Handle Google News redirects
             final_url = article_url
             final_domain = domain
+            redirect_detected = False
 
             if is_google_news:
                 from urllib.request import Request, urlopen
@@ -275,9 +277,14 @@ class ScraperClient:
                     # Get the final domain
                     final_domain = self._get_domain_from_url(final_url)
 
-                    # Log the redirect information
-                    logger.info(
-                        f"Google News redirect: {article_url} -> {final_url} (took {redirect_time:.2f}s)")
+                    # Flag that we detected a redirect
+                    if final_url != article_url:
+                        redirect_detected = True
+                        logger.info(
+                            f"Google News redirect: {article_url} -> {final_url} (took {redirect_time:.2f}s)")
+                    else:
+                        logger.warning(
+                            f"No redirect detected for Google News URL: {article_url}")
 
                     # If the domain changed, we need to acquire a rate limit slot for the new domain
                     if final_domain != domain:
@@ -301,10 +308,30 @@ class ScraperClient:
             content = extract_article_content(final_url, referrer)
 
             if content:
-                # Store the original and final URLs in the content
-                if is_google_news and final_url != article_url:
+                # Always add redirect information for Google News URLs even if no redirect was detected
+                if is_google_news:
+                    logger.info(
+                        f"Adding Google News URL information to content data")
                     content['original_url'] = article_url
                     content['final_url'] = final_url
+                    content['final_domain'] = final_domain
+                    content['original_domain'] = original_domain
+                    if not redirect_detected:
+                        logger.warning(
+                            f"No redirect detected for Google News URL. Using original domain: {original_domain}")
+                # For non-Google News URLs that were still redirected
+                elif redirect_detected or final_url != article_url:
+                    logger.info(
+                        f"Adding redirect information for non-Google News URL")
+                    content['original_url'] = article_url
+                    content['final_url'] = final_url
+                    content['final_domain'] = final_domain
+                    content['original_domain'] = original_domain
+
+                # Verify the final_domain is set
+                if 'final_domain' not in content:
+                    logger.warning(
+                        f"final_domain missing from content, adding it now: {final_domain}")
                     content['final_domain'] = final_domain
 
                 # Validate content length
@@ -329,6 +356,11 @@ class ScraperClient:
                 self.rate_limiter.report_error(domain)
                 success = False
 
+            # Final debug check before returning
+            if content and is_google_news and 'final_domain' not in content:
+                logger.error(
+                    f"CRITICAL: final_domain still missing from content data for Google News URL!")
+
             return content
         except Exception as e:
             success = False
@@ -342,7 +374,7 @@ class ScraperClient:
                 self.rate_limiter.report_error(domain)
             self.rate_limiter.release(domain)
 
-    def process_failed_feeds(self, failed_feeds_file: str, db_client=None, days: int = 5) -> Dict[str, Any]:
+    def process_failed_feeds(self, failed_feeds_file: str, db_client=None, days: int = 2) -> Dict[str, Any]:
         """
         Process previously failed RSS feeds with enhanced retry mechanisms
 
@@ -521,7 +553,7 @@ class ScraperClient:
                 f"Error processing failed feeds file {failed_feeds_file}: {e}")
             return stats
 
-    def retry_feed(self, feed_url: str, db_client=None, days: int = 5) -> Dict[str, Any]:
+    def retry_feed(self, feed_url: str, db_client=None, days: int = 2) -> Dict[str, Any]:
         """
         Manually retry a specific RSS feed URL with enhanced retry mechanisms and verbose logging
 

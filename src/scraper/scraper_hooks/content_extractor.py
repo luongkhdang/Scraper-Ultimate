@@ -7,18 +7,27 @@ Exported Functions:
 Related Files:
 - src/scraper/scraper_hooks/utils.py: Provides utility functions for HTTP requests
 - src/scraper/scraper_hooks/url_extractor.py: Provides URLs for this module to process
+- src/scraper/scraper_hooks/strategies/special_strategy.py: Special strategy for handling blocked domains
 """
 import newspaper
 from typing import Dict, Optional, Any, Tuple, List
 import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
 import re
 import time
 
 # Import local modules
 from .utils import make_request, get_random_user_agent, get_realistic_headers, random_delay, get_referrer
+
+# Import special strategy for blocked domains
+try:
+    from .strategies.special_strategy import extract_with_special_strategy
+    SPECIAL_STRATEGY_AVAILABLE = True
+except ImportError:
+    SPECIAL_STRATEGY_AVAILABLE = False
+    logging.warning(
+        "Special strategy not available. Blocked domains will be skipped.")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -126,119 +135,6 @@ def _is_blocked_domain(url_or_domain: str) -> bool:
     return False
 
 
-def _follow_redirect(url: str) -> Tuple[str, str]:
-    """Follow URL redirects and return the final destination URL and domain
-
-    This is particularly useful for RSS feed links that redirect to the actual article
-
-    Args:
-        url: The URL that may contain a redirect
-
-    Returns:
-        Tuple containing (final_url, final_domain) after following all redirects
-    """
-    try:
-        logger.info(f"Following redirects for {url}")
-
-        # Handle special cases for known redirect patterns
-        parsed_url = urlparse(url)
-        domain = parsed_url.netloc.lower()
-        final_domain = domain  # Initialize with original domain
-
-        # BizToc redirects
-        if "biztoc.com" in domain:
-            logger.info(
-                "Detected BizToc URL, looking for original article link")
-
-            response = _make_http_request(url)
-
-            if response and response.text:
-                soup = BeautifulSoup(response.text, 'html.parser')
-
-                # Look for the specific class that contains the original URL as shown in the screenshot
-                url_box = soup.find('a', class_='urlbox drops text-mono')
-                if url_box and url_box.get('href'):
-                    source_url = url_box.get('href')
-                    logger.info(
-                        f"Found original URL in urlbox: {source_url} ")
-                    final_domain = urlparse(source_url).netloc.lower()
-                    return source_url, final_domain
-
-                # Fallback - check for href in span with the same class if 'a' tag not found
-                url_box_span = soup.find(
-                    'span', class_='urlbox drops text-mono')
-                if url_box_span:
-                    parent_link = url_box_span.find_parent('a')
-                    if parent_link and parent_link.get('href'):
-                        source_url = parent_link.get('href')
-                        logger.info(
-                            f"Found original URL in urlbox span parent: {source_url} ")
-                        final_domain = urlparse(source_url).netloc.lower()
-                        return source_url, final_domain
-
-            # If we couldn't find the URL box, use the original URL
-            logger.warning(
-                "Couldn't find original URL on BizToc page, using original URL")
-
-        # Google News redirects
-        elif "news.google.com" in domain and "/articles/" in url:
-            logger.info("Detected Google News redirect URL")
-            # Google News needs special handling for redirect extraction
-            custom_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-            response = _make_http_request(
-                url, custom_user_agent=custom_user_agent)
-
-            if response and response.status_code in (301, 302, 303, 307, 308):
-                redirect_url = response.headers.get('Location')
-                if redirect_url:
-                    logger.info(f"Google News redirecting to: {redirect_url}")
-                    final_domain = urlparse(redirect_url).netloc.lower()
-                    return redirect_url, final_domain
-
-            # If no redirect in headers, try to extract from content
-            if response and response.text:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                # Google News has a canonical link or redirect URL in the HTML
-                redirect_link = soup.find('a', attrs={'jsname': 'tljFtd'})
-                if redirect_link:
-                    href = redirect_link.get('href')
-                    if href:
-                        if href.startswith('./'):
-                            href = f"https://news.google.com{href[1:]}"
-                        logger.info(
-                            f"Found redirect link in Google News page: {href} ")
-                        final_domain = urlparse(href).netloc.lower()
-                        return href, final_domain
-
-                # Look for other possible redirect links
-                all_links = soup.find_all('a')
-                for link in all_links:
-                    href = link.get('href')
-                    if href and ('http' in href) and ('google.com' not in href):
-                        logger.info(
-                            f"Found potential news source link: {href}")
-                        final_domain = urlparse(href).netloc.lower()
-                        return href, final_domain
-
-        # General redirect handling for other URLs
-        response = _make_http_request(url)
-
-        # Check if we got a redirect in the response history
-        if response and response.history:
-            final_url = response.url
-            logger.info(f"URL redirected to: {final_url}")
-            final_domain = urlparse(final_url).netloc.lower()
-            return final_url, final_domain
-
-        return url, final_domain
-
-    except Exception as e:
-        logger.error(f"Error following redirects for {url}: {e}")
-        # Return original URL and domain if redirection fails
-        return url, urlparse(url).netloc.lower()
-
-
 def _configure_newspaper():
     """Configure newspaper with optimal settings"""
     config = newspaper.Config()
@@ -249,17 +145,28 @@ def _configure_newspaper():
     return config
 
 
-def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]:
-    """Extract article content using Playwright as a fallback method with advanced paywall bypassing and DOM cleanup"""
+def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tuple[str, str]]:
+    """
+    Extract article content using Playwright as a fallback method with advanced paywall bypassing and DOM cleanup
+
+    Args:
+        article_url: The URL to extract content from
+        user_agent: The user agent to use for the request
+
+    Returns:
+        Tuple of (extracted content, final URL after redirects) or None if extraction fails
+    """
     if not PLAYWRIGHT_AVAILABLE:
         return None
 
     content = None
+    final_url = article_url  # Initialize with original URL
     retry_delays = [5000, 10000]  # Progressive delays in milliseconds
 
     # Parse domain for special handling
     domain = urlparse(article_url).netloc
     is_biztoc = "biztoc.com" in domain.lower()
+    is_google_news = "news.google.com" in domain.lower()
 
     # Default configuration for all sites
     site_config = {'wait': 'domcontentloaded',
@@ -359,11 +266,41 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                             # Check if the redirected URL is in blocked domains before navigating
                             if _is_blocked_domain(original_url):
                                 logger.info(
-                                    f"Skipping blocked domain after BizToc redirect: {original_url}")
+                                    f"Blocked domain detected after BizToc redirect: {original_url}")
                                 browser.close()
+
+                                # Try using special strategy for this blocked domain if available
+                                if SPECIAL_STRATEGY_AVAILABLE:
+                                    logger.info(
+                                        f"Attempting to use special strategy for blocked domain from BizToc: {original_url}")
+                                    try:
+                                        special_result = extract_with_special_strategy(
+                                            original_url, user_agent)
+                                        if special_result:
+                                            content, special_final_url = special_result
+                                            article_data = {
+                                                'url': special_final_url,
+                                                'title': urlparse(special_final_url).netloc,
+                                                'content': content,
+                                                'authors': [],
+                                                'published_date': None,
+                                                'scraped_at': datetime.now(timezone.utc).isoformat(),
+                                                'original_domain': urlparse(article_url).netloc.lower(),
+                                                'final_domain': urlparse(special_final_url).netloc.lower()
+                                            }
+
+                                            if not _is_content_too_short(content):
+                                                logger.info(
+                                                    f"Successfully extracted content from blocked domain via BizToc using special strategy: {original_url}")
+                                                return article_data
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Error using special strategy for blocked domain from BizToc {original_url}: {e}")
+
                                 return None
 
                             # Update the article URL to the original source
+                            final_url = original_url
                             article_url = original_url
 
                             # Now navigate to the original article
@@ -377,8 +314,77 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                     except Exception as e:
                         logger.error(
                             f"Error handling BizToc URL in Playwright: {e}")
+                # Special handling for Google News URLs
+                elif is_google_news:
+                    logger.info(
+                        "Google News URL detected in Playwright, handling redirects")
+
+                    try:
+                        # First, navigate to the Google News URL
+                        logger.info(
+                            f"Navigating to Google News URL: {article_url}")
+                        page.goto(article_url, timeout=30000,
+                                  wait_until='domcontentloaded')
+
+                        # Google News typically auto-redirects to the target article
+                        # Wait for navigation to complete
+                        # Wait for redirect to happen
+                        page.wait_for_timeout(5000)
+
+                        # Get the redirected URL
+                        redirected_url = page.url
+
+                        # Check if we were redirected
+                        if redirected_url != article_url:
+                            logger.info(
+                                f"Google News redirected to: {redirected_url}")
+
+                            # Check if the redirected URL is in blocked domains
+                            if _is_blocked_domain(redirected_url):
+                                logger.info(
+                                    f"Blocked domain detected after Google News redirect: {redirected_url}")
+                                browser.close()
+
+                                # Try using special strategy for this blocked domain if available
+                                if SPECIAL_STRATEGY_AVAILABLE:
+                                    logger.info(
+                                        f"Attempting to use special strategy for blocked domain from Google News: {redirected_url}")
+                                    try:
+                                        special_result = extract_with_special_strategy(
+                                            redirected_url, user_agent)
+                                        if special_result:
+                                            content, special_final_url = special_result
+                                            article_data = {
+                                                'url': special_final_url,
+                                                'title': urlparse(special_final_url).netloc,
+                                                'content': content,
+                                                'authors': [],
+                                                'published_date': None,
+                                                'scraped_at': datetime.now(timezone.utc).isoformat(),
+                                                'original_domain': urlparse(article_url).netloc.lower(),
+                                                'final_domain': urlparse(special_final_url).netloc.lower()
+                                            }
+
+                                            if not _is_content_too_short(content):
+                                                logger.info(
+                                                    f"Successfully extracted content from blocked domain via Google News using special strategy: {redirected_url}")
+                                                return article_data
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Error using special strategy for blocked domain from Google News {redirected_url}: {e}")
+
+                                    return None
+
+                                # If not blocked, update the URLs
+                                final_url = redirected_url
+                            else:
+                                logger.warning(
+                                    "Google News didn't redirect as expected")
+                    except Exception as e:
+                        logger.error(
+                            f"Error handling Google News URL in Playwright: {e}")
                 else:
-                    # Standard navigation for non-BizToc URLs
+                    # Standard navigation for non-BizToc and non-Google News URLs
                     try:
                         # Use a simpler "commit" wait strategy for initial navigation
                         logger.info(
@@ -389,6 +395,49 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                         logger.warning(f"Navigation failed: {e}")
                         # If we timeout, we'll still try to extract content from whatever loaded
                         pass
+
+                # Get the current URL after any redirects
+                current_url = page.url
+                if current_url != article_url:
+                    logger.info(
+                        f"URL redirected from {article_url} to {current_url}")
+                    final_url = current_url
+
+                    # Check if redirected URL is in blocked domains (except for BizToc and Google News which are checked earlier)
+                    if not is_biztoc and not is_google_news and _is_blocked_domain(current_url):
+                        logger.info(
+                            f"Blocked domain detected after redirect: {current_url}")
+                        browser.close()
+
+                        # Try using special strategy for this blocked domain if available
+                        if SPECIAL_STRATEGY_AVAILABLE:
+                            logger.info(
+                                f"Attempting to use special strategy for blocked domain after redirect: {current_url}")
+                            try:
+                                special_result = extract_with_special_strategy(
+                                    current_url, user_agent)
+                                if special_result:
+                                    content, special_final_url = special_result
+                                    article_data = {
+                                        'url': special_final_url,
+                                        'title': urlparse(special_final_url).netloc,
+                                        'content': content,
+                                        'authors': [],
+                                        'published_date': None,
+                                        'scraped_at': datetime.now(timezone.utc).isoformat(),
+                                        'original_domain': urlparse(article_url).netloc.lower(),
+                                        'final_domain': urlparse(special_final_url).netloc.lower()
+                                    }
+
+                                    if not _is_content_too_short(content):
+                                        logger.info(
+                                            f"Successfully extracted content from blocked domain after redirect using special strategy: {current_url}")
+                                        return article_data
+                            except Exception as e:
+                                logger.error(
+                                    f"Error using special strategy for blocked domain after redirect {current_url}: {e}")
+
+                        return None
 
                 if delay > 0:
                     logger.info(
@@ -479,7 +528,7 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
                 if content and len(content) > 200:
                     logger.info(
                         f"Successfully extracted content using Playwright for {article_url} on attempt {attempt+1}")
-                    return content
+                    return content, final_url
 
                 logger.info(
                     f"Attempt {attempt+1} failed to extract sufficient content")
@@ -491,52 +540,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[str]
         # If content was extracted or we've tried all delays, exit the loop
         if content or attempt >= len(retry_delays):
             break
-
-    return content
-
-
-def _extract_with_soup(response_text: str) -> Optional[str]:
-    """Extract article content using BeautifulSoup as a fallback method"""
-    try:
-        soup = BeautifulSoup(response_text, 'html.parser')
-
-        # Try to find the main content container
-        main_content = None
-
-        # Look for common article content containers
-        for container_selector in ['article', 'main', '.post-content', '.article-content', '.entry-content', '.content']:
-            if container_selector.startswith('.'):
-                # Class selector
-                elements = soup.find_all(class_=container_selector[1:])
-            else:
-                # Tag selector
-                elements = soup.find_all(container_selector)
-
-            for el in elements:
-                # Reasonable length for article content
-                if len(el.get_text(strip=True)) > 200:
-                    main_content = el
-                    break
-
-            if main_content:
-                break
-
-        # If we found a content container, extract text from paragraphs
-        if main_content:
-            # Extract paragraphs from the main content
-            paragraphs = main_content.find_all('p')
-
-            # Join paragraphs with double newlines for readability
-            content = '\n\n'.join([p.get_text(strip=True) for p in paragraphs
-                                   # Skip short paragraphs
-                                   if len(p.get_text(strip=True)) > 20])
-
-            # If we found substantial content, return it
-            if content and len(content) > 200:
-                return content
-
-    except Exception as e:
-        logger.error(f"Error using BeautifulSoup fallback: {e}")
 
     return None
 
@@ -577,10 +580,60 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
     Returns:
         Dictionary containing article details or None if extraction fails
     """
-    # Check if domain is in blocked list
-    if _is_blocked_domain(article_url):
-        logger.info(f"Skipping blocked domain: {article_url}")
+    # Check if domain is in blocked list and if special strategy is available
+    domain_blocked = _is_blocked_domain(article_url)
+
+    if domain_blocked and not SPECIAL_STRATEGY_AVAILABLE:
+        logger.info(
+            f"Skipping blocked domain without special strategy: {article_url}")
         return None
+
+    # For blocked domains with special strategy available, we'll try that approach
+    if domain_blocked and SPECIAL_STRATEGY_AVAILABLE:
+        logger.info(
+            f"Using special strategy for blocked domain: {article_url}")
+        try:
+            # Get realistic user agent for the special strategy
+            user_agent = get_random_user_agent()
+
+            # Use special strategy to extract content
+            special_result = extract_with_special_strategy(
+                article_url, user_agent)
+
+            if special_result:
+                content, final_url = special_result
+
+                # Create article data with the extracted content
+                article_data = {
+                    'url': final_url,
+                    # Use domain as fallback title
+                    'title': urlparse(final_url).netloc,
+                    'content': content,
+                    'authors': [],
+                    'published_date': None,
+                    'scraped_at': datetime.now(timezone.utc).isoformat(),
+                    'original_domain': urlparse(article_url).netloc.lower(),
+                    'final_domain': urlparse(final_url).netloc.lower()
+                }
+
+                # Check if content is sufficient
+                if not _is_content_too_short(content):
+                    logger.info(
+                        f"Successfully extracted content from blocked domain using special strategy: {article_url}")
+                    return article_data
+                else:
+                    logger.warning(
+                        f"Content from special strategy too short for: {article_url}")
+                    return None
+            else:
+                logger.warning(
+                    f"Special strategy failed for blocked domain: {article_url}")
+                return None
+
+        except Exception as e:
+            logger.error(
+                f"Error using special strategy for blocked domain {article_url}: {e}")
+            return None
 
     # Maximum retries for short content detection
     max_retries = 3
@@ -598,48 +651,10 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             # Get original domain for logging
             original_url = article_url
             original_domain = urlparse(article_url).netloc.lower()
-
-            # Special handling for BizToc URLs
-            is_biztoc = "biztoc.com" in original_domain
-
-            # Follow redirects to get the real article URL if it's a redirect link
-            # Check if this is likely a redirect URL
-            is_redirect_url = any([
-                is_biztoc,
-                ("news.google.com" in original_domain),
-                ("/redirect/" in article_url),
-                ("/r?" in article_url),
-                ("url=" in article_url)
-            ])
-
             final_domain = original_domain
-            if is_redirect_url:
-                # Follow redirects to get the actual article URL
-                article_url, final_domain = _follow_redirect(article_url)
 
-                # Check if redirected URL is in blocked domains
-                if _is_blocked_domain(final_domain):
-                    logger.info(
-                        f"Skipping blocked domain after redirect: {final_domain} ({article_url})")
-                    return None
-
-                if article_url != original_url:
-                    # Update domain to the one we actually redirected to
-                    logger.info(
-                        f"Redirected from {original_domain} to {final_domain}")
-
-                    # For BizToc, add a delay to ensure the target page has time to load
-                    if is_biztoc:
-                        logger.info(
-                            "BizToc URL detected, adding delay before scraping target page")
-                        # Simple delay to ensure the target page loads
-                        time.sleep(2)
-                else:
-                    logger.warning(
-                        f"Failed to follow redirect for {original_url}")
-
-            # Get domain from final URL to track old articles
-            domain = urlparse(article_url).netloc
+            # Get domain for tracking old articles
+            domain = original_domain
 
             # Use realistic referrer
             if not referrer:
@@ -711,29 +726,35 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
             # Use fallbacks if content is too short or missing
             if content_too_short or not article.text:
                 logger.warning(
-                    f"Article extraction may have failed for {article_url}. Using fallback methods")
+                    f"Article extraction may have failed for {article_url}. Using Playwright fallback")
 
-                # Try BeautifulSoup fallback
-                if response:
-                    soup_content = _extract_with_soup(response.text)
-                    if soup_content and not _is_content_too_short(soup_content):
-                        article_data['content'] = soup_content
-                        logger.info(
-                            f"Successfully extracted content using BeautifulSoup fallback for {article_url} ")
-                        fallback_used = True
-                    elif soup_content:
-                        logger.warning(
-                            "BeautifulSoup content too short, trying Playwright")
+                # Try Playwright fallback
+                playwright_result = _extract_with_playwright(
+                    article_url, user_agent)
 
-                # If BeautifulSoup fallback didn't work or content still too short, try Playwright
-                if (not fallback_used or _is_content_too_short(article_data['content'])):
-                    playwright_content = _extract_with_playwright(
-                        article_url, user_agent)
+                if playwright_result:
+                    playwright_content, final_url = playwright_result
+
                     if playwright_content and not _is_content_too_short(playwright_content):
                         article_data['content'] = playwright_content
                         fallback_used = True
                         logger.info(
                             f"Successfully extracted content using Playwright for {article_url}")
+
+                        # Update URL and domain based on Playwright's handling of redirects
+                        if final_url != article_url:
+                            final_domain = urlparse(final_url).netloc.lower()
+
+                            # Check if redirected URL is in blocked domains
+                            if _is_blocked_domain(final_domain):
+                                logger.info(
+                                    f"Skipping blocked domain after Playwright redirect: {final_domain} ({final_url})")
+                                return None
+
+                            article_data['url'] = final_url
+                            article_data['final_domain'] = final_domain
+                            logger.info(
+                                f"Playwright redirected from {original_domain} to {final_domain}")
                     elif playwright_content:
                         logger.warning("Playwright content too short")
 

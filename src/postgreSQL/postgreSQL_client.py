@@ -280,6 +280,22 @@ class PostgreSQLClient:
             conn = self.get_connection()
             cursor = conn.cursor()
 
+            # First, get the current domain if we're updating it
+            current_domain = None
+            if domain:
+                try:
+                    cursor.execute(
+                        "SELECT domain FROM articles WHERE id = %s", (article_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        current_domain = result[0]
+                except Exception as e:
+                    logger.warning(
+                        f"Could not retrieve current domain for article {article_id}: {e}")
+
+            # Always include domain update if provided, regardless of success or failure
+            domain_update = ", domain = %s" if domain else ""
+
             if error_message:
                 # Update with error message and mark as FAILED
                 cursor.execute("""
@@ -289,7 +305,7 @@ class PostgreSQLClient:
                         scraped_at = CURRENT_TIMESTAMP
                         {}
                     WHERE id = %s
-                """.format("," + "domain = %s" if domain else ""),
+                """.format(domain_update),
                     (error_message, domain, article_id) if domain else (error_message, article_id))
                 status = "FAILED"
             else:
@@ -301,14 +317,18 @@ class PostgreSQLClient:
                         scraped_at = CURRENT_TIMESTAMP
                         {}
                     WHERE id = %s
-                """.format("," + "domain = %s" if domain else ""),
+                """.format(domain_update),
                     (content, domain, article_id) if domain else (content, article_id))
                 status = "ReadyForReview"
 
             conn.commit()
             if domain:
-                logger.info(
-                    f"Updated article ID {article_id}: Status = {status}, Domain updated to {domain}")
+                if current_domain and current_domain != domain:
+                    logger.info(
+                        f"Updated article ID {article_id}: Status = {status}, Domain updated from '{current_domain}' to '{domain}'")
+                else:
+                    logger.info(
+                        f"Updated article ID {article_id}: Status = {status}, Domain set to '{domain}'")
             else:
                 logger.info(
                     f"Updated article ID {article_id}: Status = {status}")
