@@ -159,9 +159,9 @@ def main():
 
         # Create two separate thread pools: one for RSS feeds, one for pending articles
         # Allocate 40% of workers for RSS feeds, minimum 5
-        rss_workers = max(int(PARALLEL_WORKERS * 0.4), 5)
+        rss_workers = max(int(PARALLEL_WORKERS * 0.1), 1)
         # Allocate 60% of workers for articles, minimum 5
-        article_workers = max(int(PARALLEL_WORKERS * 0.6), 5)
+        article_workers = max(int(PARALLEL_WORKERS * 0.9), 5)
 
         logger.info(
             f"Creating thread pools with {rss_workers} RSS workers and {article_workers} article workers")

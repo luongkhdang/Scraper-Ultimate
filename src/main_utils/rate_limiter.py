@@ -7,6 +7,8 @@ Exported Classes:
   - release(domain: str) -> None: Releases a previously acquired request slot
   - report_success(domain: str) -> None: Reports a successful request
   - report_error(domain: str) -> None: Reports a failed request, triggering restrictive rate limiting
+  - add_excluded_domain(domain: str) -> None: Adds a domain to the exclusion list
+  - remove_excluded_domain(domain: str) -> None: Removes a domain from the exclusion list
 
 Related Files:
 - main.py: Main orchestration file that uses these utilities
@@ -17,7 +19,7 @@ import time
 import threading
 import logging
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Dict, Set, List
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -34,9 +36,10 @@ class RateLimiter:
     - Global cooldown between requests
     - Domain-specific cooldown between requests
     - Dynamic rate limiting that becomes more restrictive after errors
+    - Domain exclusion list for bypassing rate limits
     """
 
-    def __init__(self, max_concurrent: int = 10, global_cooldown_ms: int = 500, domain_cooldown_ms: int = 2000):
+    def __init__(self, max_concurrent: int = 10, global_cooldown_ms: int = 500, domain_cooldown_ms: int = 2000, excluded_domains: List[str] = None):
         """
         Initialize the rate limiter
 
@@ -44,6 +47,7 @@ class RateLimiter:
             max_concurrent: Maximum number of concurrent requests
             global_cooldown_ms: Minimum time between any requests in milliseconds
             domain_cooldown_ms: Minimum time between requests to the same domain in milliseconds
+            excluded_domains: List of domains to exclude from rate limiting
         """
         self.max_concurrent = max_concurrent
         self.global_cooldown_ms = global_cooldown_ms
@@ -59,8 +63,39 @@ class RateLimiter:
         self.domain_error_count: Dict[str, int] = defaultdict(int)
         self.active_domains: Set[str] = set()
 
+        # Excluded domains
+        self.excluded_domains: Set[str] = set(excluded_domains or [])
+        if self.excluded_domains:
+            logger.info(
+                f"Rate limiter initialized with excluded domains: {', '.join(self.excluded_domains)}")
+
         logger.info(f"Rate limiter initialized: max_concurrent={max_concurrent}, "
                     f"global_cooldown={global_cooldown_ms}ms, domain_cooldown={domain_cooldown_ms}ms")
+
+    def add_excluded_domain(self, domain: str) -> None:
+        """
+        Add a domain to the exclusion list to bypass rate limiting
+
+        Args:
+            domain: Domain to exclude from rate limiting
+        """
+        with self.lock:
+            self.excluded_domains.add(domain)
+            logger.info(
+                f"Added domain to rate limiter exclusion list: {domain}")
+
+    def remove_excluded_domain(self, domain: str) -> None:
+        """
+        Remove a domain from the exclusion list
+
+        Args:
+            domain: Domain to remove from the exclusion list
+        """
+        with self.lock:
+            if domain in self.excluded_domains:
+                self.excluded_domains.remove(domain)
+                logger.info(
+                    f"Removed domain from rate limiter exclusion list: {domain}")
 
     def acquire(self, domain: str) -> bool:
         """
@@ -73,6 +108,12 @@ class RateLimiter:
             True if request is allowed, False if it should be delayed
         """
         with self.lock:
+            # Skip rate limiting for excluded domains
+            if domain in self.excluded_domains:
+                logger.debug(
+                    f"Rate limit: domain {domain} is excluded from rate limiting")
+                return True
+
             current_time = time.time() * 1000  # Convert to milliseconds
 
             # Check for global concurrency limit
@@ -126,6 +167,10 @@ class RateLimiter:
             domain: Domain that was requested
         """
         with self.lock:
+            # Skip for excluded domains
+            if domain in self.excluded_domains:
+                return
+
             if self.current_requests > 0:
                 self.current_requests -= 1
             if domain in self.active_domains:
@@ -139,6 +184,10 @@ class RateLimiter:
             domain: Domain that was successfully requested
         """
         with self.lock:
+            # Skip for excluded domains
+            if domain in self.excluded_domains:
+                return
+
             # After a successful request, reduce the error count more aggressively
             if domain in self.domain_error_count and self.domain_error_count[domain] > 0:
                 # Reduce by 2 instead of 1 to recover faster from errors
@@ -155,6 +204,10 @@ class RateLimiter:
             domain: Domain that failed
         """
         with self.lock:
+            # Skip for excluded domains
+            if domain in self.excluded_domains:
+                return
+
             # Increment error count, which will increase backoff
             self.domain_error_count[domain] += 1
             logger.info(

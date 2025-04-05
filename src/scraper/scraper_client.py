@@ -50,15 +50,21 @@ class ScraperClient:
         logger.info("Initializing ScraperClient")
         self.unique_domains: Set[str] = set()
 
+        # List of domains to exclude from rate limiting
+        excluded_domains = ["news.google.com", "biztoc.com"]
+
         # Initialize rate limiter with bandwidth-conserving parameters
         self.rate_limiter = RateLimiter(
-            max_concurrent=10,     # Reduced from 50 to 10 due to bandwidth constraints
+            max_concurrent=30,     # Reduced from 50 to 10 due to bandwidth constraints
             global_cooldown_ms=200,  # Increased from 100ms to 200ms to reduce request frequency
             # Increased from 500ms to 1000ms to reduce per-domain request frequency
-            domain_cooldown_ms=1000
+            domain_cooldown_ms=1000,
+            excluded_domains=excluded_domains
         )
         logger.info(
-            "Rate limiter initialized with settings: 10 concurrent requests, 200ms global cooldown, 1000ms per domain")
+            "Rate limiter initialized with settings: 30 concurrent requests, 200ms global cooldown, 1000ms per domain")
+        logger.info(
+            f"Rate limiter excluded domains: {', '.join(excluded_domains)}")
 
     def _get_domain_from_url(self, url: str) -> str:
         """Extract the domain from a URL for rate limiting purposes"""
