@@ -1,0 +1,56 @@
+# Custom torrc configuration for dperson/torproxy
+
+# Basic configuration
+
+DataDirectory /var/lib/tor/data
+Log notice stdout
+SocksPort 0.0.0.0:9050
+ControlPort 0.0.0.0:9051
+
+# Note: Authentication is handled by dperson/torproxy using HashedControlPassword
+
+CookieAuthentication 0
+
+# Increase circuit build timeout
+
+CircuitBuildTimeout 60
+
+# Try more directory servers
+
+UseEntryGuards 1
+NumEntryGuards 8
+
+# Faster circuit rotation
+
+MaxCircuitDirtiness 600
+NewCircuitPeriod 15
+MaxClientCircuitsPending 32
+
+# Avoid common connectivity issues
+
+ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy
+UseBridges 0
+
+# Use Google DNS
+
+ServerDNSResolvConfFile /etc/resolv.conf
+ServerDNSDetectHijacking 1
+DNSPort 0
+
+# Increase various timeouts to help with bootstrap
+
+CircuitBuildTimeout 60
+ConnectionPadding auto
+KeepalivePeriod 60
+NewCircuitPeriod 40
+
+# Exit policy
+
+ExitPolicy reject _:_
+ExitRelay 0
+
+# Disable risky features
+
+DisableAllSwap 1
+HardwareAccel 1
+PASSWORD "your_secure_password"

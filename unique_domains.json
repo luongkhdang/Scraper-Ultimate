@@ -2,10 +2,15 @@
   "unique_domains": [
     "feeds.businessinsider.com",
     "feeds.content.dowjones.io",
+    "feeds.washingtonpost.com",
+    "nypost.com",
     "rss.nytimes.com",
+    "thehill.com",
     "www.businessinsider.com",
+    "www.businesstimes.com.sg",
     "www.economist.com",
     "www.marketwatch.com",
-    "www.nytimes.com"
+    "www.nytimes.com",
+    "www.wsj.com"
   ]
 }

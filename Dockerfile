@@ -24,12 +24,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     libatspi2.0-0 \
     libdbus-1-3 \
+    # Tor and network tools
+    netcat-openbsd \
+    curl \
+    python3-socks \
+    python3-stem \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install  -r requirements.txt
+
+# Install additional packages for Tor communication
+RUN pip install  stem requests[socks] pysocks
 
 # Install NLTK data
 RUN python -m nltk.downloader punkt
@@ -41,6 +49,9 @@ RUN python -m playwright install --with-deps chromium
 
 # Copy the rest of the application
 COPY . .
+
+# Set Docker environment flag
+ENV RUNNING_IN_DOCKER=true
 
 # Command to run the scraper
 CMD ["python", "src/main.py"] 

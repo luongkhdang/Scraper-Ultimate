@@ -1,18 +1,30 @@
 {
-  "total_failed_feeds": 3,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=5, tm_hour=4, tm_min=2, tm_sec=25, tm_wday=5, tm_yday=95, tm_isdst=0)",
+  "total_failed_feeds": 6,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=6, tm_hour=20, tm_min=30, tm_sec=30, tm_wday=6, tm_yday=96, tm_isdst=0)",
   "feeds": {
-    "https://rss.nytimes.com/services/xml/rss/nyt/US.xml": {
+    "https://nypost.com/us-news/feed/": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-05 01:28:19.345171"
+      "timestamp": "2025-04-06 18:47:59.259681"
     },
-    "https://www.economist.com/asia/rss.xml": {
+    "https://www.businesstimes.com.sg/rss/banking-finance": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-05 01:28:19.345188"
+      "timestamp": "2025-04-06 18:47:59.722432"
     },
-    "http://feeds.benzinga.com/benzinga/trading-ideas": {
+    "https://www.economist.com/finance-and-economics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-06 18:48:00.549922"
+    },
+    "https://www.economist.com/international/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-06 18:48:00.979320"
+    },
+    "https://feeds.washingtonpost.com/rss/world": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-06 18:48:09.808990"
+    },
+    "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-05 04:02:25.%f"
+      "timestamp": "2025-04-06 20:30:30.%f"
     }
   }
 }

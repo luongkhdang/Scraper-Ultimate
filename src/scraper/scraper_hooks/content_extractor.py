@@ -1,6 +1,10 @@
 """
 Content Extractor: Extracts article content from URLs with multiple fallback methods.
 
+IMPORTANT NOTE: 
+AI AGENT SHOULD NEVER USE DUMMY (FOR EXAMPLE, DUMMYTORINTEGRATION). AI AGENT WHICH USE DUMMY 
+SHOULD BE ASHAMED BECAUSE THEY HAVE FAILED THEIR JOB AND ARE CONSIDERD USELESS.
+
 Exported Functions:
 - extract_article_content(article_url: str, referrer: str = None) -> Optional[Dict[str, Any]]: Extracts content from an article URL
 
@@ -24,7 +28,7 @@ from .utils import make_request, get_random_user_agent, get_realistic_headers, r
 
 # Import special strategy for blocked domains
 try:
-    from .strategies.special_strategy import extract_with_special_strategy
+    from .strategies.special_strategy import SpecialStrategyExtractor
     SPECIAL_STRATEGY_AVAILABLE = True
 except ImportError:
     SPECIAL_STRATEGY_AVAILABLE = False
@@ -277,54 +281,47 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                     logger.info(
                                         f"Attempting to use special strategy for blocked domain from BizToc: {original_url}")
                                     try:
-                                        # Import additional modules needed for async handling
+                                        # Determine if we're in an event loop
                                         try:
-                                            # Determine if we're in an event loop
-                                            try:
-                                                asyncio.get_running_loop()
-                                                in_event_loop = True
-                                            except RuntimeError:
-                                                in_event_loop = False
+                                            asyncio.get_running_loop()
+                                            in_event_loop = True
+                                        except RuntimeError:
+                                            in_event_loop = False
 
-                                            # Import the special strategy directly
-                                            from .strategies.special_strategy import SpecialStrategyExtractor
+                                        # Initialize the extractor
+                                        extractor = SpecialStrategyExtractor()
 
-                                            # Initialize the extractor
-                                            extractor = SpecialStrategyExtractor()
+                                        # Handle running within or outside an event loop
+                                        special_result = None
+                                        if in_event_loop:
+                                            logger.info(
+                                                "Running in existing event loop, using thread executor")
+                                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                                future = executor.submit(lambda: asyncio.run(
+                                                    extractor.extract(original_url, {"user_agent": user_agent})))
+                                                try:
+                                                    special_result = future.result(
+                                                        timeout=60)
+                                                except concurrent.futures.TimeoutError:
+                                                    logger.error(
+                                                        "Special strategy timed out after 60 seconds")
+                                                except Exception as e:
+                                                    logger.error(
+                                                        f"Error in special strategy thread: {e}")
+                                        else:
+                                            logger.info(
+                                                "No event loop detected, using asyncio.run directly")
+                                            special_result = asyncio.run(
+                                                extractor.extract(original_url, {"user_agent": user_agent}))
 
-                                            # Handle running within or outside an event loop
-                                            if in_event_loop:
-                                                logger.info(
-                                                    "Running in existing event loop, using thread executor")
-                                                with concurrent.futures.ThreadPoolExecutor() as executor:
-                                                    future = executor.submit(lambda: asyncio.run(
-                                                        extractor.extract(original_url, user_agent)))
-                                                    try:
-                                                        special_result = future.result(
-                                                            timeout=60)
-                                                    except concurrent.futures.TimeoutError:
-                                                        logger.error(
-                                                            "Special strategy timed out after 60 seconds")
-                                                        special_result = None
-                                                    except Exception as e:
-                                                        logger.error(
-                                                            f"Error in special strategy thread: {e}")
-                                                        special_result = None
-                                            else:
-                                                logger.info(
-                                                    "No event loop detected, using asyncio.run directly")
-                                                special_result = asyncio.run(
-                                                    extractor.extract(original_url, user_agent))
-                                        except Exception as e:
-                                            logger.error(
-                                                f"Error setting up async execution: {e}")
-                                            # Fall back to the standard import
-                                            from .strategies.special_strategy import extract_with_special_strategy
-                                            special_result = extract_with_special_strategy(
-                                                original_url, user_agent)
+                                        # Process result dictionary
+                                        if special_result and special_result.get("success", False):
+                                            # Extract content and final URL from result dictionary
+                                            content = special_result.get(
+                                                "content", "")
+                                            special_final_url = special_result.get(
+                                                "url", original_url)
 
-                                        if special_result:
-                                            content, special_final_url = special_result
                                             article_data = {
                                                 'url': special_final_url,
                                                 'title': urlparse(special_final_url).netloc,
@@ -361,7 +358,7 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                     except Exception as e:
                         logger.error(
                             f"Error handling BizToc URL in Playwright: {e}")
-                # Special handling for Google News URLs
+                # Special handling for Google News URLs - improved redirect detection
                 elif is_google_news:
                     logger.info(
                         "Google News URL detected in Playwright, handling redirects")
@@ -374,17 +371,214 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                   wait_until='domcontentloaded')
 
                         # Google News typically auto-redirects to the target article
-                        # Wait for navigation to complete
-                        # Wait for redirect to happen
-                        page.wait_for_timeout(5000)
+                        # Implement adaptive waiting with polling instead of fixed timeout
+                        max_wait_time = 15000  # Maximum wait time in ms
+                        poll_interval = 500    # Check every 500ms
+                        start_time = time.time()
+                        initial_url = page.url
+                        redirected_url = initial_url
+                        redirect_detected = False
 
-                        # Get the redirected URL
-                        redirected_url = page.url
+                        logger.info(
+                            f"Starting redirect detection polling for Google News. Initial URL: {initial_url}")
 
-                        # Check if we were redirected
-                        if redirected_url != article_url:
+                        # Poll for URL changes with a maximum wait time
+                        while time.time() - start_time < max_wait_time/1000:
+                            current_url = page.url
+
+                            # If URL changed, we detected a redirect
+                            if current_url != initial_url:
+                                redirected_url = current_url
+                                redirect_detected = True
+                                redirect_time = time.time() - start_time
+                                logger.info(
+                                    f"Redirect detected after {redirect_time:.2f}s: {redirected_url}")
+
+                                # Wait a bit more to ensure we get the final URL (some sites do multi-stage redirects)
+                                page.wait_for_timeout(1000)
+
+                                # Check one more time for any additional redirects
+                                final_redirected_url = page.url
+                                if final_redirected_url != redirected_url:
+                                    logger.info(
+                                        f"Additional redirect detected: {final_redirected_url}")
+                                    redirected_url = final_redirected_url
+                                break
+
+                            # Wait before checking again
+                            page.wait_for_timeout(poll_interval)
+
+                        # If no redirect detected, try alternative approaches
+                        if not redirect_detected:
+                            logger.warning(
+                                f"No automatic redirect detected for Google News URL after {max_wait_time/1000}s waiting")
+
+                            # Try to find and click on article links
+                            try:
+                                # Common selectors for Google News article links
+                                link_selectors = [
+                                    'a h3', 'h3 a', 'a.DY5T1d', 'a.VDXfz',
+                                    'article a', '.article a', 'div[role="article"] a'
+                                ]
+
+                                # Try each selector
+                                for selector in link_selectors:
+                                    try:
+                                        # First ensure the page is stable before trying to query elements
+                                        page.wait_for_load_state(
+                                            'domcontentloaded', timeout=5000)
+
+                                        # Add a small delay to ensure the page is interactive
+                                        page.wait_for_timeout(500)
+
+                                        # Check if we can query elements safely
+                                        elements = page.query_selector_all(
+                                            selector)
+
+                                        if elements and len(elements) > 0:
+                                            logger.info(
+                                                f"Found potential article link with selector '{selector}', attempting to click")
+
+                                            # Store the current URL before clicking
+                                            pre_click_url = page.url
+
+                                            # We'll use evaluate to click to avoid context issues
+                                            # This is more stable than directly clicking the element
+                                            page.evaluate(f"""() => {{
+                                                const elements = document.querySelectorAll('{selector}');
+                                                if (elements && elements.length > 0) {{
+                                                    elements[0].click();
+                                                    return true;
+                                                }}
+                                                return false;
+                                            }}""")
+
+                                            # Create a promise to watch for navigation
+                                            logger.info(
+                                                "Waiting for navigation after click...")
+
+                                            # Use wait_for_url_change instead of wait_for_load_state
+                                            # This is more reliable for detecting redirects
+                                            try:
+                                                # Wait for URL to change from the initial URL with a reasonable timeout
+                                                with page.expect_navigation(wait_until='domcontentloaded', timeout=10000) as navigation_info:
+                                                    pass
+
+                                                # Check if navigation occurred
+                                                current_url = page.url
+                                                if current_url != pre_click_url:
+                                                    redirected_url = current_url
+                                                    redirect_detected = True
+                                                    logger.info(
+                                                        f"Successfully navigated to article via click: {redirected_url}")
+                                                    break
+                                            except Exception as navigation_error:
+                                                logger.warning(
+                                                    f"Navigation error after click: {navigation_error}")
+
+                                                # Check if URL changed despite error
+                                                current_url = page.url
+                                                if current_url != pre_click_url:
+                                                    redirected_url = current_url
+                                                    redirect_detected = True
+                                                    logger.info(
+                                                        f"URL changed despite navigation error: {redirected_url}")
+                                                    break
+                                    except Exception as selector_error:
+                                        logger.debug(
+                                            f"Error with selector '{selector}': {selector_error}")
+                                        # Continue trying other selectors
+                                        continue
+
+                                if not redirect_detected:
+                                    # Try one more approach - look for the main article link that might be prominent
+                                    try:
+                                        page.wait_for_load_state(
+                                            'domcontentloaded', timeout=5000)
+                                        page.wait_for_timeout(500)
+
+                                        # Try to find the most prominent link - usually the first large one
+                                        # This might work when specific selectors fail
+                                        result = page.evaluate("""() => {
+                                            // Look for the largest link that might be an article
+                                            const links = Array.from(document.querySelectorAll('a')).filter(a => {
+                                                // Filter for links that have substantial content and seem like article links
+                                                const hasText = a.innerText && a.innerText.length > 30;
+                                                const hasImage = a.querySelector('img');
+                                                const isLarge = a.offsetWidth > 200 || a.offsetHeight > 100;
+                                                return (hasText || hasImage) && isLarge;
+                                            });
+                                            
+                                            // Sort by size (approximated by offsetWidth * offsetHeight)
+                                            links.sort((a, b) => {
+                                                const aSize = a.offsetWidth * a.offsetHeight;
+                                                const bSize = b.offsetWidth * b.offsetHeight;
+                                                return bSize - aSize;  // Descending order
+                                            });
+                                            
+                                            // Click the largest link if available
+                                            if (links.length > 0) {
+                                                links[0].click();
+                                                return true;
+                                            }
+                                            return false;
+                                        }""")
+
+                                        if result:
+                                            logger.info(
+                                                "Clicked on the most prominent link")
+
+                                            # Wait for navigation
+                                            try:
+                                                with page.expect_navigation(wait_until='domcontentloaded', timeout=10000) as navigation_info:
+                                                    pass
+
+                                                # Check if URL changed
+                                                current_url = page.url
+                                                if current_url != initial_url:
+                                                    redirected_url = current_url
+                                                    redirect_detected = True
+                                                    logger.info(
+                                                        f"Successfully navigated to article via prominent link: {redirected_url}")
+                                            except Exception as navigation_error:
+                                                logger.warning(
+                                                    f"Navigation error after clicking prominent link: {navigation_error}")
+
+                                                # Still check if URL changed
+                                                current_url = page.url
+                                                if current_url != initial_url:
+                                                    redirected_url = current_url
+                                                    redirect_detected = True
+                                                    logger.info(
+                                                        f"URL changed despite navigation error: {redirected_url}")
+                                    except Exception as prominent_error:
+                                        logger.warning(
+                                            f"Error trying to find prominent link: {prominent_error}")
+
+                                    if not redirect_detected:
+                                        logger.warning(
+                                            "Failed to find clickable article links")
+                            except Exception as click_error:
+                                logger.warning(
+                                    f"Error during manual article navigation: {click_error}")
+
+                                # Check if the URL changed despite the error
+                                try:
+                                    current_url = page.url
+                                    if current_url != initial_url:
+                                        redirected_url = current_url
+                                        redirect_detected = True
+                                        logger.info(
+                                            f"URL changed despite click error: {redirected_url}")
+                                except Exception:
+                                    # If we can't even check the URL, the page is likely in a bad state
+                                    pass
+
+                        # Update final_url if a redirect was detected
+                        if redirect_detected:
                             logger.info(
                                 f"Google News redirected to: {redirected_url}")
+                            final_url = redirected_url
 
                             # Check if the redirected URL is in blocked domains
                             if _is_blocked_domain(redirected_url):
@@ -397,54 +591,47 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                     logger.info(
                                         f"Attempting to use special strategy for blocked domain from Google News: {redirected_url}")
                                     try:
-                                        # Import additional modules needed for async handling
+                                        # Determine if we're in an event loop
                                         try:
-                                            # Determine if we're in an event loop
-                                            try:
-                                                asyncio.get_running_loop()
-                                                in_event_loop = True
-                                            except RuntimeError:
-                                                in_event_loop = False
+                                            asyncio.get_running_loop()
+                                            in_event_loop = True
+                                        except RuntimeError:
+                                            in_event_loop = False
 
-                                            # Import the special strategy directly
-                                            from .strategies.special_strategy import SpecialStrategyExtractor
+                                        # Initialize the extractor
+                                        extractor = SpecialStrategyExtractor()
 
-                                            # Initialize the extractor
-                                            extractor = SpecialStrategyExtractor()
+                                        # Handle running within or outside an event loop
+                                        special_result = None
+                                        if in_event_loop:
+                                            logger.info(
+                                                "Running in existing event loop, using thread executor")
+                                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                                future = executor.submit(lambda: asyncio.run(
+                                                    extractor.extract(redirected_url, {"user_agent": user_agent})))
+                                                try:
+                                                    special_result = future.result(
+                                                        timeout=60)
+                                                except concurrent.futures.TimeoutError:
+                                                    logger.error(
+                                                        "Special strategy timed out after 60 seconds")
+                                                except Exception as e:
+                                                    logger.error(
+                                                        f"Error in special strategy thread: {e}")
+                                        else:
+                                            logger.info(
+                                                "No event loop detected, using asyncio.run directly")
+                                            special_result = asyncio.run(
+                                                extractor.extract(redirected_url, {"user_agent": user_agent}))
 
-                                            # Handle running within or outside an event loop
-                                            if in_event_loop:
-                                                logger.info(
-                                                    "Running in existing event loop, using thread executor")
-                                                with concurrent.futures.ThreadPoolExecutor() as executor:
-                                                    future = executor.submit(lambda: asyncio.run(
-                                                        extractor.extract(redirected_url, user_agent)))
-                                                    try:
-                                                        special_result = future.result(
-                                                            timeout=60)
-                                                    except concurrent.futures.TimeoutError:
-                                                        logger.error(
-                                                            "Special strategy timed out after 60 seconds")
-                                                        special_result = None
-                                                    except Exception as e:
-                                                        logger.error(
-                                                            f"Error in special strategy thread: {e}")
-                                                        special_result = None
-                                            else:
-                                                logger.info(
-                                                    "No event loop detected, using asyncio.run directly")
-                                                special_result = asyncio.run(
-                                                    extractor.extract(redirected_url, user_agent))
-                                        except Exception as e:
-                                            logger.error(
-                                                f"Error setting up async execution: {e}")
-                                            # Fall back to the standard import
-                                            from .strategies.special_strategy import extract_with_special_strategy
-                                            special_result = extract_with_special_strategy(
-                                                redirected_url, user_agent)
+                                        # Process result dictionary
+                                        if special_result and special_result.get("success", False):
+                                            # Extract content and final URL from result dictionary
+                                            content = special_result.get(
+                                                "content", "")
+                                            special_final_url = special_result.get(
+                                                "url", redirected_url)
 
-                                        if special_result:
-                                            content, special_final_url = special_result
                                             article_data = {
                                                 'url': special_final_url,
                                                 'title': urlparse(special_final_url).netloc,
@@ -465,12 +652,9 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                             f"Error using special strategy for blocked domain from Google News {redirected_url}: {e}")
 
                                     return None
-
-                                # If not blocked, update the URLs
-                                final_url = redirected_url
                             else:
                                 logger.warning(
-                                    "Google News didn't redirect as expected")
+                                    "Google News redirect detection failed, will attempt content extraction from the original page")
                     except Exception as e:
                         logger.error(
                             f"Error handling Google News URL in Playwright: {e}")
@@ -487,14 +671,16 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                         # If we timeout, we'll still try to extract content from whatever loaded
                         pass
 
-                # Get the current URL after any redirects
+                # Handle redirects for all URLs (get current URL after all navigation)
                 current_url = page.url
                 if current_url != article_url:
+                    # Only log if not already handled by special cases above
+                    if not (is_biztoc or is_google_news):
                     logger.info(
                         f"URL redirected from {article_url} to {current_url}")
                     final_url = current_url
 
-                    # Check if redirected URL is in blocked domains (except for BizToc and Google News which are checked earlier)
+                    # Check if redirected URL is in blocked domains (only for non-special case URLs)
                     if not is_biztoc and not is_google_news and _is_blocked_domain(current_url):
                         logger.info(
                             f"Blocked domain detected after redirect: {current_url}")
@@ -505,54 +691,46 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                             logger.info(
                                 f"Attempting to use special strategy for blocked domain after redirect: {current_url}")
                             try:
-                                # Import additional modules needed for async handling
+                                # Determine if we're in an event loop
                                 try:
-                                    # Determine if we're in an event loop
-                                    try:
-                                        asyncio.get_running_loop()
-                                        in_event_loop = True
-                                    except RuntimeError:
-                                        in_event_loop = False
+                                    asyncio.get_running_loop()
+                                    in_event_loop = True
+                                except RuntimeError:
+                                    in_event_loop = False
 
-                                    # Import the special strategy directly
-                                    from .strategies.special_strategy import SpecialStrategyExtractor
+                                # Initialize the extractor
+                                extractor = SpecialStrategyExtractor()
 
-                                    # Initialize the extractor
-                                    extractor = SpecialStrategyExtractor()
+                                # Handle running within or outside an event loop
+                                special_result = None
+                                if in_event_loop:
+                                    logger.info(
+                                        "Running in existing event loop, using thread executor")
+                                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                                        future = executor.submit(lambda: asyncio.run(
+                                            extractor.extract(current_url, {"user_agent": user_agent})))
+                                        try:
+                                            special_result = future.result(
+                                                timeout=60)
+                                        except concurrent.futures.TimeoutError:
+                                            logger.error(
+                                                "Special strategy timed out after 60 seconds")
+                                        except Exception as e:
+                                            logger.error(
+                                                f"Error in special strategy thread: {e}")
+                                else:
+                                    logger.info(
+                                        "No event loop detected, using asyncio.run directly")
+                                    special_result = asyncio.run(
+                                        extractor.extract(current_url, {"user_agent": user_agent}))
 
-                                    # Handle running within or outside an event loop
-                                    if in_event_loop:
-                                        logger.info(
-                                            "Running in existing event loop, using thread executor")
-                                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                                            future = executor.submit(lambda: asyncio.run(
-                                                extractor.extract(current_url, user_agent)))
-                                            try:
-                                                special_result = future.result(
-                                                    timeout=60)
-                                            except concurrent.futures.TimeoutError:
-                                                logger.error(
-                                                    "Special strategy timed out after 60 seconds")
-                                                special_result = None
-                                            except Exception as e:
-                                                logger.error(
-                                                    f"Error in special strategy thread: {e}")
-                                                special_result = None
-                                    else:
-                                        logger.info(
-                                            "No event loop detected, using asyncio.run directly")
-                                        special_result = asyncio.run(
-                                            extractor.extract(current_url, user_agent))
-                                except Exception as e:
-                                    logger.error(
-                                        f"Error setting up async execution: {e}")
-                                    # Fall back to the standard import
-                                    from .strategies.special_strategy import extract_with_special_strategy
-                                    special_result = extract_with_special_strategy(
-                                        current_url, user_agent)
+                                # Process result dictionary
+                                if special_result and special_result.get("success", False):
+                                    # Extract content and final URL from result dictionary
+                                    content = special_result.get("content", "")
+                                    special_final_url = special_result.get(
+                                        "url", current_url)
 
-                                if special_result:
-                                    content, special_final_url = special_result
                                     article_data = {
                                         'url': special_final_url,
                                         'title': urlparse(special_final_url).netloc,
@@ -586,7 +764,7 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                         page.wait_for_timeout(500)
                     page.evaluate("window.scrollTo(0, 0)")
 
-                # Try to get article content even if the page didn't fully load
+                # Extract content from the page
                 try:
                     # Extract article content
                     content_selectors = [
@@ -718,6 +896,20 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
     # Check if domain is in blocked list and if special strategy is available
     domain_blocked = _is_blocked_domain(article_url)
 
+    # Get original domain for tracking
+    original_url = article_url
+    original_domain = urlparse(article_url).netloc.lower()
+
+    # Early detection of Google News URLs
+    is_google_news = "news.google.com" in original_domain
+
+    # Use realistic referrer if not provided
+    if not referrer:
+        referrer = get_referrer()
+
+    # Get random user agent for extraction
+    user_agent = get_random_user_agent()
+
     if domain_blocked and not SPECIAL_STRATEGY_AVAILABLE:
         logger.info(
             f"Skipping blocked domain without special strategy: {article_url}")
@@ -739,9 +931,6 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                 except RuntimeError:
                     in_event_loop = False
 
-                # Import the special strategy directly
-                from .strategies.special_strategy import SpecialStrategyExtractor
-
                 # Initialize the extractor
                 extractor = SpecialStrategyExtractor()
 
@@ -751,7 +940,7 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                         "Running in existing event loop, using thread executor")
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         future = executor.submit(lambda: asyncio.run(
-                            extractor.extract(article_url, user_agent)))
+                            extractor.extract(article_url, {"user_agent": user_agent})))
                         try:
                             special_result = future.result(timeout=60)
                         except concurrent.futures.TimeoutError:
@@ -766,16 +955,16 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                     logger.info(
                         "No event loop detected, using asyncio.run directly")
                     special_result = asyncio.run(
-                        extractor.extract(article_url, user_agent))
+                        extractor.extract(article_url, {"user_agent": user_agent}))
             except Exception as e:
                 logger.error(f"Error setting up async execution: {e}")
-                # Fall back to the standard import
-                from .strategies.special_strategy import extract_with_special_strategy
-                special_result = extract_with_special_strategy(
-                    article_url, user_agent)
+                return None
 
-            if special_result:
-                content, final_url = special_result
+            # Process result dictionary
+            if special_result and special_result.get("success", False):
+                # Extract content and final URL from result dictionary
+                content = special_result.get("content", "")
+                final_url = special_result.get("url", article_url)
 
                 # Create article data with the extracted content
                 article_data = {
@@ -800,14 +989,59 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                         f"Content from special strategy too short for: {article_url}")
                     return None
             else:
+                # Get error message if available
+                error_msg = special_result.get(
+                    "error", "Unknown error") if special_result else "No result returned"
                 logger.warning(
-                    f"Special strategy failed for blocked domain: {article_url}")
+                    f"Special strategy failed for blocked domain: {error_msg}")
                 return None
 
         except Exception as e:
             logger.error(
                 f"Error using special strategy for blocked domain {article_url}: {e}")
             return None
+
+    # Special handling for Google News URLs - skip standard extraction and use Playwright directly
+    if is_google_news and PLAYWRIGHT_AVAILABLE:
+        logger.info(
+            f"Google News URL detected, using direct Playwright extraction: {article_url}")
+
+        # Try Playwright extraction which has enhanced Google News redirect handling
+        playwright_result = _extract_with_playwright(article_url, user_agent)
+
+        if playwright_result:
+            content, final_url = playwright_result
+
+            if content and not _is_content_too_short(content):
+                # Extract final domain from the redirected URL
+                final_domain = urlparse(final_url).netloc.lower(
+                ) if final_url else original_domain
+
+                # Prepare complete article data with proper domain tracking
+                article_data = {
+                    'url': final_url,
+                    'title': "Article from " + final_domain,  # We may not have a proper title
+                    'content': content,
+                    'authors': [],
+                    'published_date': None,
+                    'scraped_at': datetime.now(timezone.utc).isoformat(),
+                    'original_url': original_url,
+                    'final_url': final_url,
+                    'original_domain': original_domain,
+                    'final_domain': final_domain
+                }
+
+                logger.info(
+                    f"Successfully extracted Google News content: {original_url} -> {final_url}")
+                return article_data
+            else:
+                logger.warning(
+                    f"Failed to extract sufficient content from Google News URL: {article_url}")
+                return None
+        else:
+            logger.warning(
+                f"Playwright extraction failed for Google News URL: {article_url}")
+            # Continue with standard extraction as fallback
 
     # Maximum retries for short content detection
     max_retries = 3
@@ -822,20 +1056,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
 
             logger.info(f"Extracting content from {article_url}")
 
-            # Get original domain for logging
-            original_url = article_url
-            original_domain = urlparse(article_url).netloc.lower()
+            # Set initial domain tracking
             final_domain = original_domain
 
-            # Get domain for tracking old articles
+            # Domain for tracking old articles
             domain = original_domain
 
-            # Use realistic referrer
-            if not referrer:
-                referrer = get_referrer()
-
             # Configure newspaper with random user agent
-            user_agent = get_random_user_agent()
             newspaper.Config().browser_user_agent = user_agent
             newspaper.Config().fetch_images = False  # Skip image fetching for performance
 
@@ -925,7 +1152,12 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                                     f"Skipping blocked domain after Playwright redirect: {final_domain} ({final_url})")
                                 return None
 
+                            # Update all URL and domain tracking fields consistently
                             article_data['url'] = final_url
+                            # Add this for compatibility with scraper_client
+                            article_data['final_url'] = final_url
+                            # Add this for compatibility with scraper_client
+                            article_data['original_url'] = original_url
                             article_data['final_domain'] = final_domain
                             logger.info(
                                 f"Playwright redirected from {original_domain} to {final_domain}")
@@ -942,6 +1174,13 @@ def extract_article_content(article_url: str, referrer: str = None) -> Optional[
                     logger.error(
                         f"Failed to extract sufficient content after {max_retries} attempts: {article_url}")
                     return None
+
+            # Ensure consistent field names for domain tracking
+            # These fields are expected by scraper_client.py
+            if 'original_url' not in article_data:
+                article_data['original_url'] = original_url
+            if 'final_url' not in article_data:
+                article_data['final_url'] = article_data['url']
 
             logger.info(f"Successfully extracted content from {article_url}")
             return article_data

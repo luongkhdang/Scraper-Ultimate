@@ -51,23 +51,21 @@ services:
       - "9051:9051" # Control port for IP rotation
     environment:
       TORPASSWORD: "your_secure_password"
+      # Add DNS settings to help with connectivity
       DNS1: "1.1.1.1"
       DNS2: "8.8.8.8"
-    # Use the proper command format for dperson/torproxy
-    command: -p "your_secure_password"
-    # Use a more reliable health check without netcat
+    # Pass our custom torrc file
+    command: -p "your_secure_password" -n
+    # Use more lenient health check that won't fail immediately
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "timeout 5 cat < /dev/null > /dev/tcp/localhost/9050 || exit 1",
-        ]
+      test: ["CMD-SHELL", "nc -z localhost 9050 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 120s
     volumes:
       - tor_data:/var/lib/tor
+      - ./torrc:/etc/tor/torrc:ro # Mount our custom torrc file
     networks:
       - app_network
     cap_add:
@@ -84,7 +82,7 @@ services:
       postgres:
         condition: service_healthy
       tor:
-        condition: service_started
+        condition: service_healthy
     # Add a healthcheck to test the tor connection
     healthcheck:
       test:
@@ -111,7 +109,6 @@ services:
       TOR_SOCKS_PORT: 9050
       TOR_CONTROL_PORT: 9051
       TOR_CONTROL_PASSWORD: "your_secure_password" # Should match TORPASSWORD in tor service
-      TORPASSWORD: "your_secure_password" # Added for compatibility
       TOR_CONTAINER_NAME: "tor"
       TOR_CIRCUIT_TIMEOUT: 5
     networks:
