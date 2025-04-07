@@ -43,7 +43,7 @@ from ..base import BaseExtractor
 NOT_TO_TRY_DOMAINS = [
     "thehill.com",
     "wsj.com",
-    "nytimes.com"
+    "nytimes.com",
 ]
 
 # Import tor integration with robust error handling

@@ -676,8 +676,8 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                 if current_url != article_url:
                     # Only log if not already handled by special cases above
                     if not (is_biztoc or is_google_news):
-                    logger.info(
-                        f"URL redirected from {article_url} to {current_url}")
+                        logger.info(
+                            f"URL redirected from {article_url} to {current_url}")
                     final_url = current_url
 
                     # Check if redirected URL is in blocked domains (only for non-special case URLs)

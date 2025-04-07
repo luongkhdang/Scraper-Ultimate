@@ -1,5 +1,6 @@
 https://biztoc.com/feed
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=politic
+https://thehill.com/policy/feed/
 https://www.benzinga.com/general/politics/feed
 http://feeds.benzinga.com/benzinga/trading-ideas
 https://www.latimes.com/rss2.0.xml
@@ -15,6 +16,7 @@ https://feeds.washingtonpost.com/rss/business
 https://www.theguardian.com/business/economics/rss
 https://feedx.net/rss/ap.xml
 https://www.the-independent.com/news/business/rss
+https://feeds.content.dowjones.io/public/rss/RSSWorldNews
 https://feeds-api.dotdashmeredith.com/v1/rss/standard/8242c021-c2de-4de3-a8b8-f2ffdd3f4ce0
 https://nypost.com/politics/feed/
 https://feeds.feedburner.com/timeblogs/swampland
@@ -24,6 +26,7 @@ https://www.businesstimes.com.sg/rss/banking-finance
 https://prod-qt-images.s3.amazonaws.com/production/bloombergquint/feed.xml
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=stock
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=power
+https://thehill.com/business/feed/
 https://www.benzinga.com/markets/feed
 http://feeds.benzinga.com/benzinga/markets/options
 https://www.latimes.com/rss2.0.xml
@@ -36,22 +39,27 @@ https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml
 https://feeds.washingtonpost.com/rss/rss_fact-checker
 https://www.theguardian.com/us-news/us-politics/rss
 https://www.telegraph.co.uk/business/rss.xml
+https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness
 https://feeds.feedburner.com/reuters/oddlyEnoughNews/
 https://nypost.com/us-news/feed/
 https://feeds.feedburner.com/hackread
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=economy
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=war
+https://thehill.com/opinion/feed/
 https://www.latimes.com/politics/rss2.0.xml
 https://www.economist.com/china/rss.xml
 https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml
 https://feeds.washingtonpost.com/rss/rss_the-fix
 https://www.theguardian.com/us/business/rss
+https://feeds.content.dowjones.io/public/rss/RSSMarketsMain
+https://thehill.com/news/feed/
 http://feeds.benzinga.com/benzinga
 https://www.economist.com/united-states/rss.xml
 https://www.usnews.com/rss/the-report
 https://rss.nytimes.com/services/xml/rss/nyt/AsiaPacific.xml
 https://feeds.washingtonpost.com/rss/rss_rampage
 https://www.theguardian.com/business/stock-markets/rss
+https://feeds.content.dowjones.io/public/rss/RSSUSnews
 https://nypost.com/world-news/feed/
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=vietnam
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=trade
@@ -62,6 +70,7 @@ https://rss.nytimes.com/services/xml/rss/nyt/World.xml
 https://feeds.washingtonpost.com/rss/world
 https://www.theguardian.com/us/commentisfree/rss
 https://www.the-independent.com/news/world/rss
+https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed
 https://nypost.com/business/feed/
 https://feeds.feedburner.com/CalculatedRisk
 https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US%3Aen&oc=11&q=tax
@@ -75,6 +84,7 @@ https://www.economist.com/business/rss.xml
 https://finance.yahoo.com/news/rssindex
 https://feeds.washingtonpost.com/rss/national
 https://www.theguardian.com/us/business/rss
+https://feeds.content.dowjones.io/public/rss/socialeconomyfeed
 https://feeds.content.dowjones.io/public/rss/mw_bulletins
 https://nypost.com/opinion/feed/
 https://feeds.feedburner.com/zerohedge/feed
