@@ -1,6 +1,6 @@
 {
   "total_failed_feeds": 60,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=7, tm_hour=4, tm_min=46, tm_sec=13, tm_wday=0, tm_yday=97, tm_isdst=0)",
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=7, tm_hour=4, tm_min=57, tm_sec=41, tm_wday=0, tm_yday=97, tm_isdst=0)",
   "feeds": {
     "https://biztoc.com/feed": {
       "error": "No articles extracted",
@@ -128,7 +128,7 @@
     },
     "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-07 04:46:13.%f"
+      "timestamp": "2025-04-07 04:57:41.%f"
     },
     "https://www.theguardian.com/us-news/us-politics/rss": {
       "error": "No articles extracted",

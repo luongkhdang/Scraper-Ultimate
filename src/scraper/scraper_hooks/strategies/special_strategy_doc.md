@@ -1,236 +1,348 @@
-# Special Strategy System: Verification and Implementation Status
+# Enhanced Special Strategy Implementation Plan
 
-!IMPORANT: DO NOT USE PARALLEL PROCESSING
+## Overview
 
-The `special_strategy.py` module provides specialized scraping capabilities for websites with paywalls, anti-bot measures, and dynamic content loading. This review analyzes the current scraping process with a focus on balancing human-like behavior with performance efficiency.
+This document outlines a comprehensive plan to enhance the current `special_strategy.py` with the playwright-stealth library while maintaining fallback capabilities. This will create a more robust scraping strategy that better evades detection while preserving the existing functionality.
 
-## Current Scraping Process
+## Goals
 
-After examining all related files, I can confirm that the SpecialStrategyExtractor follows this process for extracting content:
+1. Implement playwright-stealth for comprehensive bot detection evasion
+2. Maintain compatibility with existing Tor integration
+3. Create a modular approach that allows fallback to current strategies
+4. Improve detection evasion capabilities based on techniques in `more.md`
+5. Maintain code maintainability and modularity
 
-1. **Strategy Selection**: Determines site-specific strategies and Tor usage based on domain
-2. **Browser Initialization**: Creates a browser context with stealth settings via `browser_setup.py`
-3. **Special URL Handling**: Processes aggregator URLs via `url_handlers.py`
-4. **Page Navigation**: Loads the target URL with appropriate timeouts
-5. **Consent Dialog Handling**: Uses `consent_handler.py` to bypass cookie notices
-6. **Scroll Simulation**: Performs basic scrolling to mimic human behavior
-7. **Content Unblocking**: Removes paywalls and other blocking elements
-8. **Content Extraction**: Extracts content using selectors via `content_extraction.py`
-9. **Content Validation**: Ensures content meets minimum quality thresholds
-10. **Retry Mechanism**: Implements increasing delays if content extraction fails
+## Implementation Plan
 
-## Implementation Status
+### Phase 1: Setup and Integration
 
-### ✅ Completed Improvements
+1. **Add Dependencies**
 
-#### Browser Fingerprinting Issues
+   - Add playwright-stealth to the project's dependencies
+   - Ensure compatibility with the current Playwright version
 
-- Reduced browser arguments to only critical flags in `browser_setup.py` (get_default_browser_args function)
-- Added WebDriver detection countermeasures in `browser_setup.py` (create_browser_context function)
-- Implemented randomized HTTP headers in `browser_setup.py` (setup_page_defaults function)
-- Added realistic, modern user agents in `browser_setup.py` (setup_device_emulation function)
-- Implemented consistent fingerprinting within sessions in `special_strategy.py` (\_apply_consistent_fingerprint method)
-- Added randomized scrolling behavior in `special_strategy.py` (extract method)
+2. **Create Initial Structure**
 
-#### Human-like Consent Handling
+   - Create a new file `special_strategy_two.py` based on `special_strategy.py`
+   - Implement an enhanced version of `browser_setup.py` called `stealth_browser_setup.py`
 
-- Implemented human-like positioning and delays when clicking consent buttons in `consent_handler.py`
+3. **Integrate Basic playwright-stealth**
+   - Modify context creation to use playwright-stealth
+   - Test basic functionality with simple sites
 
-#### Tor Rotation Patterns
+### Phase 2: Enhanced Implementation
 
-- Implemented randomized timing in Tor rotation in `special_strategy.py`
+1. **Extend Current Capabilities**
 
-#### Resource Loading
+   - Integrate advanced browser arguments from `more.md`
+   - Implement enhanced JavaScript injection techniques
+   - Add conditional browser context configuration based on site requirements
 
-- Optimized resource blocking with resource type-based approach in `browser_setup.py`
+2. **Tor Integration Enhancement**
 
-#### Adaptive Retry Strategy
+   - Ensure playwright-stealth works properly with Tor
+   - Implement circuit rotation based on detection triggers
+   - Add fallback mechanisms if Tor is unavailable
 
-- Implemented adaptive retry strategy in `special_strategy.py`
+3. **Detection Avoidance Improvements**
+   - Implement advanced timing randomization
+   - Add more sophisticated user behavior simulation
+   - Use persistent contexts for challenging sites
 
-### ⏳ Pending Improvements
+### Phase 3: Fallback Mechanism
 
-#### Detection Recovery
+1. **Implement Strategy Selection**
 
-- Still needs implementation of adaptive retry strategies based on failure detection
+   - Create a strategy selector that can choose between stealth and standard approach
+   - Add automatic fallback if stealth approach fails
+   - Implement domain-specific strategy selection
 
-## Critical Analysis
+2. **Error Handling and Recovery**
+   - Enhance error detection for bot challenges
+   - Add recovery mechanisms specific to playwright-stealth
+   - Implement cross-strategy session handling
 
-### Human-Like Behavior vs. Performance
+### Phase 4: Testing and Optimization
 
-#### Browser Fingerprinting Issues
+1. **Test Suite Development**
 
-✅ **FIXED**: The browser arguments have been reduced to only critical flags:
+   - Create tests for key challenging sites
+   - Implement comparison testing between strategies
+   - Add performance benchmarking
+
+2. **Optimization**
+   - Profile and optimize browser resource usage
+   - Tune stealth parameters for best results
+   - Optimize for specific high-value targets
+
+## Technical Details
+
+### Enhanced Browser Setup
 
 ```python
-def get_default_browser_args() -> List[str]:
+async def create_stealth_browser_context(url, user_agent=None, use_tor=False):
+    """
+    Create an enhanced browser context using playwright-stealth
+
+    Args:
+        url: Target URL for extraction
+        user_agent: Optional user agent to use
+        use_tor: Whether to use Tor proxy
+
+    Returns:
+        Tuple of (playwright, browser, context, page) objects
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        logger.error("Playwright not available, cannot create browser context")
+        return None, None, None, None
+
+    try:
+        playwright = await async_playwright().start()
+
+        # Get enhanced browser arguments from more.md
+        browser_args = get_enhanced_browser_args()
+
+        # Set up browser launch options
+        browser_options = {
+            "headless": True,
+            "args": browser_args
+        }
+
+        # Add Tor proxy if needed and available
+        if use_tor and tor_integration.is_ready():
+            browser_options = tor_integration.setup_tor_for_browser(browser_options)
+
+        # Determine if we should use persistent context for this domain
+        if should_use_persistent_context(url):
+            # Create a temporary user data directory
+            user_data_dir = tempfile.mkdtemp(prefix="playwright_profile_")
+
+            # Launch with persistent context
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                **browser_options
+            )
+
+            browser = None  # No separate browser object with persistent context
+        else:
+            # Launch browser normally
+            browser = await playwright.chromium.launch(**browser_options)
+
+            # Set up device emulation based on user agent
+            context_options = setup_enhanced_device_emulation(playwright, user_agent)
+
+            # Create context with options
+            context = await browser.new_context(**context_options)
+
+        # Apply stealth using playwright-stealth
+        await stealth_sync.stealth_async(context)
+
+        # Additional custom evasions from more.md
+        await apply_additional_evasions(context)
+
+        # Create page
+        page = await context.new_page()
+
+        # Set up page defaults
+        await setup_enhanced_page_defaults(page)
+
+        return playwright, browser, context, page
+
+    except Exception as e:
+        logger.error(f"Error creating stealth browser context: {e}")
+        return None, None, None, None
+```
+
+### Browser Launch Arguments
+
+Enhanced browser arguments from `more.md`:
+
+```python
+def get_enhanced_browser_args():
+    """
+    Get enhanced browser arguments from more.md for stealth browsing
+
+    Returns:
+        List[str]: List of browser arguments
+    """
     return [
         '--disable-blink-features=AutomationControlled',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-site-isolation-trials',
+        '--disable-notifications',
+        '--disable-automation',
+        '--disable-sync',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-dev-shm-usage',
         '--disable-extensions',
+        '--disable-renderer-backgrounding',
+        '--disable-hang-monitor',
+        '--disable-ipc-flooding-protection',
+        '--disable-popup-blocking',
         '--no-first-run',
         '--no-default-browser-check'
     ]
 ```
 
-#### Header Predictability
-
-✅ **FIXED**: Headers now include randomization:
+### Strategy Selection Logic
 
 ```python
-# Randomize key fingerprinting headers
-languages = ['en-US,en;q=0.9', 'en-US,en;q=0.8,es;q=0.2', 'en-GB,en;q=0.9', 'en-CA,en;q=0.8,fr-CA;q=0.2']
-platforms = ['Windows', 'Macintosh', 'Linux']
-referrers = [
-    'https://www.google.com/search?q=news+today',
-    'https://www.bing.com/search?q=latest+articles',
-    # more referrers...
-]
+def select_strategy(url, previous_attempt_failed=False):
+    """
+    Select the appropriate strategy based on URL and previous attempts
 
-await page.set_extra_http_headers({
-    'Accept-Language': random.choice(languages),
-    'sec-ch-ua-platform': f'"{random.choice(platforms)}"',
-    'Referer': random.choice(referrers),
-    # ... other headers
-})
+    Args:
+        url: The URL to be processed
+        previous_attempt_failed: Whether a previous attempt failed
+
+    Returns:
+        str: Strategy name ('stealth' or 'standard')
+    """
+    domain = urlparse(url).netloc.lower()
+
+    # Always use standard strategy for these domains
+    if domain in STANDARD_STRATEGY_DOMAINS:
+        return 'standard'
+
+    # If stealth previously failed, try standard
+    if previous_attempt_failed:
+        return 'standard'
+
+    # Default to stealth for better evasion
+    return 'stealth'
 ```
 
-#### WebDriver Detection Weaknesses
+### Enhanced Extractor Implementation
 
-✅ **FIXED**: WebDriver detection countermeasures have been implemented:
+The main extractor class will be enhanced to support both strategies:
 
 ```python
-await context.add_init_script("""
-    // Critical WebDriver removal
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => false
-    });
+class EnhancedSpecialStrategyExtractor(BaseExtractor):
+    """
+    Enhanced Special Strategy Extractor with stealth capabilities
 
-    // Remove automation flags
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    This extractor can use both playwright-stealth and the standard approach,
+    with automatic fallback between them.
+    """
 
-    // Hide automation artifacts
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ||
-        parameters.name === 'geolocation' ||
-        parameters.name === 'persistent-storage' ||
-        parameters.name === 'camera' ||
-        parameters.name === 'microphone'
-    )
-    ? originalQuery(parameters)
-    : Promise.resolve({state: Notification.permission});
-""")
+    def __init__(self, config=None):
+        super().__init__(config)
+        self.config = config or {}
+        # Rest of initialization
+
+    async def extract(self, url, config=None):
+        """
+        Extract content using the appropriate strategy with fallback
+
+        Args:
+            url: URL to extract content from
+            config: Optional configuration overrides
+
+        Returns:
+            dict: Extracted content or error information
+        """
+        # Check blocked domains
+        if is_domain_blocked(url):
+            return {
+                "success": False,
+                "error": "Domain is in NOT_TO_TRY_DOMAINS list",
+                "url": url
+            }
+
+        merged_config = {**self.config, **(config or {})}
+
+        # Try stealth strategy first
+        strategy = select_strategy(url)
+
+        if strategy == 'stealth':
+            result = await self._extract_with_stealth(url, merged_config)
+
+            # If stealth failed, try standard as fallback
+            if not result.get("success", False):
+                logger.info(f"Stealth strategy failed, falling back to standard for {url}")
+                result = await self._extract_with_standard(url, merged_config)
+        else:
+            # Use standard strategy directly
+            result = await self._extract_with_standard(url, merged_config)
+
+        return result
+
+    async def _extract_with_stealth(self, url, config):
+        """
+        Extract using playwright-stealth strategy
+        """
+        # Implementation using playwright-stealth
+
+    async def _extract_with_standard(self, url, config):
+        """
+        Extract using the standard strategy (original implementation)
+        """
+        # Original implementation from special_strategy.py
 ```
 
-#### Timing Patterns
+## Integration with Current Codebase
 
-✅ **FIXED**: Scrolling delays now include randomization:
+1. **File Organization**:
 
-```python
-# Randomize scroll delay to appear more human-like
-await page.wait_for_timeout(random.randint(400, 800))
-```
+   - `special_strategy_two.py`: Enhanced strategy with playwright-stealth and fallback
+   - `stealth_browser_setup.py`: Enhanced browser setup with playwright-stealth
+   - Original files remain untouched for backward compatibility
 
-#### User Agent Selection
+2. **API Compatibility**:
 
-✅ **FIXED**: User agent handling now includes realistic, modern options:
+   - Maintain the same API for backward compatibility
+   - Add new parameters for enhanced functionality
 
-```python
-# Modern realistic user agents for better stealth
-realistic_uas = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.42'
-]
+3. **Configuration Management**:
 
-# If no user agent is provided, select one randomly
-if not user_agent:
-    user_agent = random.choice(realistic_uas)
-```
+   - Allow configuration of strategy selection
+   - Provide domain-specific configuration
 
-#### Tor Rotation Patterns
+4. **Tor Integration**:
+   - Ensure Tor works correctly with both strategies
+   - Add enhanced Tor circuit handling for stealth strategy
 
-✅ **FIXED**: Tor rotation now includes randomization:
+## Testing Strategy
 
-```python
-if use_tor and self.tor_available and attempt > 0:
-    # Add slight randomization to rotation timing
-    await asyncio.sleep(random.uniform(2.7, 3.3))  # Small variation around 3s
-    logger.info("Rotating Tor IP for new attempt")
-    await tor_integration.rotate_tor_connection()
-```
+1. **Unit Tests**:
 
-### Performance Bottlenecks
+   - Test individual components (browser setup, evasion techniques)
+   - Test strategy selection logic
 
-#### Resource Loading
+2. **Integration Tests**:
 
-✅ **FIXED**: Resource blocking has been optimized with a resource type-based approach:
+   - Test with various site types
+   - Test fallback mechanisms
 
-```python
-# Block resources by type rather than extension for better performance
-await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
-```
+3. **Comparison Testing**:
+   - Compare results with and without stealth
+   - Track detection rates
 
-#### Detection Recovery
+## Expected Benefits
 
-⏳ **PENDING**: Fixed retry strategy needs adaptation to specific failure modes.
+1. **Improved Evasion**: Better avoidance of bot detection mechanisms
+2. **Maintainability**: Leverage playwright-stealth's ongoing development
+3. **Flexibility**: Choose best strategy per site
+4. **Reliability**: Fallback to proven methods when needed
 
-**Recommendation**: Implement adaptive retry strategies:
+## Timeline
 
-```python
-# Detect the type of failure and adapt strategy accordingly
-if "captcha" in await page.content().lower():
-    # Longer delay and Tor rotation for captcha challenges
-    await asyncio.sleep(random.uniform(10, 15))
-    await tor_integration.rotate_tor_connection()
-elif "unusual traffic" in await page.content().lower():
-    # Switch to more conservative browser profile
-    await context.close()
-    context = await browser.new_context(reduced_motion="reduce",
-                                       java_script_enabled=False,
-                                       bypass_csp=False)
-```
+1. **Phase 1** (Setup): 1-2 days
+2. **Phase 2** (Enhanced Implementation): 3-4 days
+3. **Phase 3** (Fallback Mechanism): 2-3 days
+4. **Phase 4** (Testing and Optimization): 2-3 days
 
-## Additional Implementation: Fingerprint Consistency
+Total estimated time: 8-12 days
 
-✅ **IMPLEMENTED**: Consistent fingerprinting within sessions has been added:
+## Potential Challenges
 
-```python
-# In __init__ method
-self.session_fingerprint = {
-    'hardware_concurrency': random.choice([2, 4, 8, 16]),
-    'device_memory': random.choice([2, 4, 8, 16]),
-    'screen_resolution': random.choice([
-        {'width': 1366, 'height': 768},
-        {'width': 1920, 'height': 1080},
-        {'width': 1440, 'height': 900},
-        {'width': 1536, 'height': 864}
-    ]),
-    'color_depth': random.choice([24, 30, 48]),
-    'platform': random.choice(['Win32', 'MacIntel', 'Linux x86_64']),
-    'timezone_offset': random.randint(-720, 720)  # -12 to +12 hours in minutes
-}
-
-# Method to apply consistent fingerprint
-async def _apply_consistent_fingerprint(self, page):
-    # Apply consistent fingerprinting values
-    # ...
-```
-
-## Implementation Priority for Remaining Tasks
-
-1. **High-Value Enhancements** (Short-term):
-
-   - Adaptive retry strategies
-
-2. **Advanced Optimizations** (Medium-term):
-   - None at this time
+1. **Compatibility Issues**: playwright-stealth may have version requirements
+2. **Performance Impact**: More sophisticated evasion may impact performance
+3. **Tor Integration**: Ensuring proper functioning with Tor
 
 ## Conclusion
 
-Significant progress has been made in addressing browser fingerprinting issues, which are the most critical anti-detection measures. The implemented changes have greatly improved the system's ability to evade detection while maintaining performance. The remaining enhancements should be implemented in a phased approach, focusing first on the high-value improvements to consent handling and Tor rotation patterns, followed by more advanced optimizations to resource loading and detection recovery.
-
-These targeted improvements provide an effective balance between anti-detection capabilities and performance, allowing the system to handle sophisticated anti-bot measures without unnecessary complexity.
+This plan provides a comprehensive approach to enhancing the current `special_strategy.py` with playwright-stealth while maintaining fallback capabilities. The implementation will create a more robust scraping strategy that better evades detection while preserving existing functionality.
