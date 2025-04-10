@@ -3,6 +3,7 @@ Special Strategy Extractor for handling restricted and protected sites.
 
 This module implements advanced extraction strategies for sites with anti-bot measures.
 Includes adaptive retry mechanisms, randomized behaviors, and detection countermeasures.
+Now includes StealthyFetcher integration as a fallback method when primary extraction fails.
 
 IMPORTANT NOTE: 
 AI AGENT SHOULD NEVER USE DUMMY (FOR EXAMPLE, DUMMYTORINTEGRATION). AI AGENT WHICH USE DUMMY 
@@ -36,6 +37,16 @@ except ImportError:
     logging.warning(
         "Playwright not available. Special strategy will be limited.")
     PlaywrightError = Exception  # Fallback definition
+
+# Check for StealthyFetcher availability
+try:
+    from scrapling.fetchers import StealthyFetcher
+    STEALTHY_FETCHER_AVAILABLE = True
+    logging.info("StealthyFetcher available for fallback extraction")
+except ImportError:
+    STEALTHY_FETCHER_AVAILABLE = False
+    logging.warning(
+        "StealthyFetcher not available. Fallback capability will be limited.")
 
 from ..base import BaseExtractor
 
@@ -88,6 +99,9 @@ try:
 except ImportError as e:
     logging.error(f"Error importing page_capture: {e}")
     PAGE_CAPTURE_AVAILABLE = False
+
+# Tag for fallback logging
+FALLBACK_TAG = "[FALLBACK]"
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +166,34 @@ class SpecialStrategyExtractor(BaseExtractor):
                         "Tor is not available or not ready. Special strategy will use direct connections.")
         except Exception as e:
             logger.error(f"Error checking Tor availability: {e}")
+
+        # Add StealthyFetcher fallback configuration
+        self.use_fallback = self.config.get("use_fallback", True)
+        self.fallback_config = self.config.get("fallback_config", {})
+
+        # Default fallback configuration for StealthyFetcher
+        self.default_fallback_config = {
+            "headless": True,
+            "block_images": True,
+            "disable_resources": True,
+            "google_search": True,
+            "block_webrtc": True,
+            "humanize": True,
+            "allow_webgl": True,
+            "network_idle": True,
+            "timeout": 45000,  # 45 seconds
+            "geoip": False,  # Enable if proxy is used
+            "os_randomize": True
+        }
+
+        # Check if StealthyFetcher is available for fallback
+        self.stealthy_fetcher_available = STEALTHY_FETCHER_AVAILABLE
+        if self.use_fallback and not self.stealthy_fetcher_available:
+            logger.warning(
+                f"{FALLBACK_TAG} StealthyFetcher fallback enabled but not available")
+        elif self.use_fallback:
+            logger.info(
+                f"{FALLBACK_TAG} StealthyFetcher fallback enabled and available")
 
         # Setup directory for capturing debugging information
         # Only create directory if page capture is available
@@ -341,6 +383,46 @@ class SpecialStrategyExtractor(BaseExtractor):
 
         except Exception as e:
             logger.error(f"Failed to save detection history: {e}")
+
+    def _get_tor_proxy_info(self):
+        """
+        Get Tor proxy information formatted for StealthyFetcher.
+
+        Returns:
+            dict or str: Proxy information in StealthyFetcher format or None if not available
+        """
+        if not self.tor_available or not tor_integration:
+            return None
+
+        try:
+            # Use the actual function available in tor_integration module
+            proxy_url = tor_integration.get_tor_proxy_url()
+            if not proxy_url:
+                logger.warning(f"{FALLBACK_TAG} No Tor proxy URL available")
+                return None
+
+            # StealthyFetcher expects either a string URL or a dict with server, username, password
+            # Check if this is already a properly formatted URL
+            if isinstance(proxy_url, str) and proxy_url.startswith(('http://', 'socks://', 'socks5://')):
+                logger.info(f"{FALLBACK_TAG} Using Tor proxy URL: {proxy_url}")
+                return proxy_url
+
+            # If we have a non-standard format, try to adapt it
+            # This is a fallback in case the proxy information format changes
+            tor_host = os.environ.get('TOR_HOST', '127.0.0.1' if not getattr(
+                tor_integration, 'IN_DOCKER', False) else 'tor')
+            tor_port = int(os.environ.get('TOR_SOCKS_PORT', 9050))
+
+            # Format as SOCKS5 proxy for StealthyFetcher
+            formatted_proxy = f"socks5://{tor_host}:{tor_port}"
+            logger.info(
+                f"{FALLBACK_TAG} Formatted Tor proxy URL: {formatted_proxy}")
+            return formatted_proxy
+
+        except Exception as e:
+            logger.error(
+                f"{FALLBACK_TAG} Error getting Tor proxy info for StealthyFetcher: {e}")
+            return None
 
     def _calculate_adaptive_delay(self, url, attempt):
         """
@@ -548,9 +630,24 @@ class SpecialStrategyExtractor(BaseExtractor):
                     logger.error(f"Error cleaning up resources: {e}")
 
         # All attempts failed
+        # If all primary attempts failed, try StealthyFetcher fallback if enabled
+        if self.use_fallback and STEALTHY_FETCHER_AVAILABLE:
+            logger.info(
+                f"All primary extraction attempts failed for {url}. Trying StealthyFetcher fallback.")
+            fallback_result = await self._extract_with_stealthy_fallback(url, merged_config)
+            if fallback_result.get("success", False):
+                logger.info(
+                    f"StealthyFetcher fallback succeeded for {url}🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴")
+                return fallback_result
+            else:
+                logger.warning(
+                    f"StealthyFetcher fallback also failed for {url}")
+
+        # If fallback is disabled or also failed, return failure
         return {
             "success": False,
-            "error": f"Failed after {self.max_retries + 1} attempts",
+            "error": f"Failed after {self.max_retries + 1} attempts" +
+            (" and fallback" if self.use_fallback and STEALTHY_FETCHER_AVAILABLE else ""),
             "url": url
         }
 
@@ -674,6 +771,190 @@ class SpecialStrategyExtractor(BaseExtractor):
         # Nothing to do here as resources are cleaned within extract()
         pass
 
+    async def _extract_with_stealthy_fallback(self, url, config):
+        """
+        Extract content using StealthyFetcher as a fallback method.
+
+        Args:
+            url: URL to extract from
+            config: Configuration dict
+
+        Returns:
+            dict: Extraction result with success status and content
+        """
+        if not STEALTHY_FETCHER_AVAILABLE:
+            logger.warning(
+                f"{FALLBACK_TAG} StealthyFetcher not available for fallback extraction")
+            return {"success": False, "error": "StealthyFetcher not available", "url": url}
+
+        try:
+            logger.info(
+                f"{FALLBACK_TAG} Configuring StealthyFetcher for {url}")
+            # Combine default fallback config with user-provided options
+            fallback_config = {
+                **self.default_fallback_config, **self.fallback_config}
+
+            # Add user agent if specified - note the parameter name is "useragent" not "user_agent"
+            if "user_agent" in config:
+                fallback_config["useragent"] = config["user_agent"]
+                logger.info(
+                    f"{FALLBACK_TAG} Using user agent: {config['user_agent'][:30]}...")
+
+            # Add proxy if Tor is configured and available
+            if config.get("use_tor", False) and self.tor_available:
+                proxy_info = self._get_tor_proxy_info()
+                if proxy_info:
+                    fallback_config["proxy"] = proxy_info
+                    fallback_config["geoip"] = True  # Enable geoIP with proxy
+                    logger.info(
+                        f"{FALLBACK_TAG} Configured Tor proxy for StealthyFetcher")
+
+            # Configure custom scrolling behavior similar to our primary method
+            async def custom_scroll_behavior(page):
+                logger.info(f"{FALLBACK_TAG} Executing custom scroll behavior")
+                # Get page height
+                page_height = await page.evaluate("() => document.body.scrollHeight")
+
+                # Perform several scroll actions with natural timing
+                scroll_count = random.randint(3, 5)
+                for i in range(scroll_count):
+                    scroll_pos = int(page_height * (i+1) / scroll_count)
+                    await page.mouse.wheel(0, scroll_pos)
+                    await page.wait_for_timeout(random.randint(500, 1500))
+
+                    # Add random pauses for reading (just like in primary method)
+                    if random.random() < 0.3:
+                        await page.wait_for_timeout(random.randint(800, 2000))
+
+                # Scroll back up partially sometimes (same behavior as primary method)
+                if random.random() < 0.7:
+                    partial_scroll_back = random.uniform(0.2, 0.6)
+                    back_position = int(page_height * partial_scroll_back)
+                    await page.evaluate(f"window.scrollTo({{top: {back_position}, behavior: 'smooth'}})")
+                    await page.wait_for_timeout(random.randint(300, 700))
+
+                return page
+
+            fallback_config["page_action"] = custom_scroll_behavior
+
+            # Configure selectors to wait for, using same content selectors as primary method
+            content_selectors = [
+                "article", "main", ".content", "#content",
+                ".article", ".post", ".entry-content"
+            ]
+            if random.random() > 0.5:  # Randomize which selector to wait for
+                fallback_config["wait_selector"] = random.choice(
+                    content_selectors)
+                fallback_config["wait_selector_state"] = "visible"
+                logger.info(
+                    f"{FALLBACK_TAG} Waiting for selector: {fallback_config['wait_selector']}")
+
+            # Perform the extraction with StealthyFetcher
+            logger.info(
+                f"{FALLBACK_TAG} Executing StealthyFetcher fallback for {url}")
+            response = await StealthyFetcher.async_fetch(url, **fallback_config)
+
+            if not response or not hasattr(response, 'html'):
+                logger.warning(
+                    f"{FALLBACK_TAG} StealthyFetcher returned empty response for {url}")
+                return {"success": False, "error": "Empty response from fallback", "url": url}
+
+            logger.info(
+                f"{FALLBACK_TAG} StealthyFetcher received response, extracting content")
+
+            # Extract content using StealthyFetcher's parsing API
+            # Note: StealthyFetcher uses different parsing methods than Playwright
+            try:
+                title = response.css_first("title::text")
+                if title and hasattr(title, 'clean'):
+                    title = title.clean()
+                elif title:
+                    title = str(title)
+                else:
+                    title = ""
+            except Exception as e:
+                logger.error(
+                    f"{FALLBACK_TAG} Error extracting title with StealthyFetcher: {e}")
+                title = ""
+
+            # Use the same content selectors as the primary method for consistency
+            text_content = ""
+            try:
+                # Extract content using StealthyFetcher's CSS selectors
+                for selector in content_selectors:
+                    elements = response.css(selector)
+                    if elements:
+                        for element in elements:
+                            # Use StealthyFetcher's text extraction methods
+                            if hasattr(element, 'get_all_text'):
+                                content = element.get_all_text(strip=True)
+                            elif hasattr(element, 'text'):
+                                content = element.text()
+                            else:
+                                content = str(element)
+
+                            if content and len(content) > 100:  # Skip short content
+                                text_content += content + "\n\n"
+
+                        # If we found substantial content, stop looking
+                        if len(text_content) > 500:
+                            break
+
+                # If no content found with specific selectors, get body content
+                if not text_content:
+                    logger.info(
+                        f"{FALLBACK_TAG} No content found with selectors, trying body")
+                    body = response.css_first("body")
+                    if body:
+                        if hasattr(body, 'get_all_text'):
+                            text_content = body.get_all_text(strip=True)
+                        elif hasattr(body, 'text'):
+                            text_content = body.text()
+                        else:
+                            text_content = str(body)
+            except Exception as e:
+                logger.error(
+                    f"{FALLBACK_TAG} Error extracting content with StealthyFetcher: {e}")
+
+            # Get metadata
+            metadata = {}
+            try:
+                for meta in response.css("meta"):
+                    # StealthyFetcher uses .attrib to access attributes
+                    name = meta.attrib.get(
+                        "name") or meta.attrib.get("property")
+                    content = meta.attrib.get("content")
+                    if name and content:
+                        metadata[name] = content
+            except Exception as e:
+                logger.error(
+                    f"{FALLBACK_TAG} Error extracting metadata with StealthyFetcher: {e}")
+
+            # Record successful extraction in history
+            self.detection_history['successful_extractions'] += 1
+
+            logger.info(
+                f"{FALLBACK_TAG} Successfully extracted content with StealthyFetcher: {len(text_content)} chars")
+
+            # Format the result to match the primary extraction method
+            return {
+                "success": True,
+                "content": {
+                    "title": title,
+                    "content": text_content.strip(),
+                    "metadata": metadata,
+                    "url": getattr(response, 'url', url),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "stealthy_fallback"  # Mark the source as fallback
+                },
+                "url": getattr(response, 'url', url)
+            }
+
+        except Exception as e:
+            logger.error(
+                f"{FALLBACK_TAG} Error in StealthyFetcher fallback: {e}")
+            return {"success": False, "error": f"Fallback extraction failed: {str(e)}", "url": url}
+
 
 async def extract_with_special_strategy(url: str, user_agent: str = None) -> tuple:
     """
@@ -691,16 +972,31 @@ async def extract_with_special_strategy(url: str, user_agent: str = None) -> tup
         # Create config dict with user agent
         config = {"user_agent": user_agent} if user_agent else {}
 
+        # Enable fallback by default in compatibility mode
+        config["use_fallback"] = True
+
         # Create extractor instance
-        extractor = SpecialStrategyExtractor()
+        extractor = SpecialStrategyExtractor(config)
 
         # Call the extract method
         result = await extractor.extract(url, config)
 
         # Process the result
         if result and result.get("success", False):
-            # The content is a string directly, not a nested dict
-            content = result.get("content", "")
+            content_data = result.get("content", {})
+
+            # Handle both string content and dict content formats
+            # The fallback returns a dict, while the primary returns content directly
+            if isinstance(content_data, dict):
+                content = content_data.get("content", "")
+                source = content_data.get("source", "primary")
+                logger.info(
+                    f"Using content from {source} source: {len(content)} chars")
+            else:
+                content = content_data
+                logger.info(
+                    f"Using content from primary source: {len(content)} chars")
+
             final_url = result.get("url", url)
             return (content, final_url)
         else:

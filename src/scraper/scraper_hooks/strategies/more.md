@@ -1,3 +1,30 @@
+# StealthyFetcher Integration Findings
+
+## Current Implementation Status
+
+The StealthyFetcher fallback implementation is already integrated directly within the `special_strategy.py` file in the `_extract_with_stealthy_fallback` method of the `SpecialStrategyExtractor` class. Despite references to a separate `stealthy_fallback.py` file in the imports and docstring, no such file exists in the codebase.
+
+### Key findings:
+
+1. **Implementation Location**: The entire fallback mechanism is embedded in `special_strategy.py` rather than in a separate module.
+
+2. **External Dependency**: StealthyFetcher is imported from `scrapling.fetchers`, which appears to be an external package not included in the workspace.
+
+3. **Implementation Details**:
+
+   - Proper error handling for when StealthyFetcher is not available
+   - Default fallback configuration defined in the `__init__` method
+   - Custom scrolling behavior implementation
+   - Consistent content selectors between primary and fallback methods
+   - Support for Tor proxy integration
+   - Detailed logging with `FALLBACK_TAG` prefix
+
+4. **Missing Requirements**: The `scrapling` package is not listed in the project's requirements.txt file, despite being referenced as a dependency.
+
+5. **Integration Pattern**: The fallback is triggered only after all primary extraction attempts have failed, providing a robust multi-layered approach.
+
+---
+
 # StealthyFetcher Integration Implementation Plan
 
 This document outlines specific implementation steps needed to integrate StealthyFetcher as a fallback mechanism in `special_strategy.py` when the primary extraction method fails.
@@ -484,7 +511,7 @@ Create or update a requirements file to include the scrapling package:
 
 ```
 # requirements.txt (or add to existing file)
-scrapling>=1.0.0  # Adjust version as needed
+scrapling==0.2.99  # Latest available version
 ```
 
 ## Step 10: Test the Implementation
