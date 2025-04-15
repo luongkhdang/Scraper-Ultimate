@@ -51,7 +51,6 @@ class ScraperClient:
     """
 
     def __init__(self):
-        logger.info("Initializing ScraperClient")
         self.unique_domains: Set[str] = set()
 
         # List of domains to exclude from rate limiting
@@ -89,7 +88,6 @@ class ScraperClient:
         Returns:
             List of discovered RSS feed URLs
         """
-        logger.info(f"Discovering RSS feeds from {website_url}")
         domain = self._get_domain_from_url(website_url)
 
         try:
@@ -120,7 +118,6 @@ class ScraperClient:
         Returns:
             List of dictionaries containing only the specified fields from RSS feed items
         """
-        logger.info(f"Extracting specific fields from RSS feed: {feed_url}")
         domain = self._get_domain_from_url(feed_url)
 
         try:
@@ -140,15 +137,11 @@ class ScraperClient:
 
             # Filter by publication date (only keep articles from the last 'days' days)
             # Pass feed_url to allow for special handling of certain feeds
-            logger.info(f"Filtering articles by date: last {days} days")
             date_filtered_content = filter_by_date(
                 filtered_content, days, feed_url)
 
             # If a database client is provided, filter out URLs that already exist in the database
             if db_client:
-                logger.info(
-                    f"Checking {len(date_filtered_content)} URLs against database")
-
                 # Extract all URLs for batch checking
                 urls_to_check = []
                 url_to_item_map = {}
@@ -237,7 +230,6 @@ class ScraperClient:
         Returns:
             Dictionary containing article details or None if extraction fails
         """
-        logger.info(f"Extracting content from {article_url}")
         domain = self._get_domain_from_url(article_url)
         original_domain = domain  # Store for later use
 
@@ -320,8 +312,6 @@ class ScraperClient:
             if content:
                 # Always add redirect information for Google News URLs even if no redirect was detected
                 if is_google_news:
-                    logger.info(
-                        f"Adding Google News URL information to content data")
                     content['original_url'] = article_url
                     content['final_url'] = final_url
                     content['final_domain'] = final_domain
@@ -331,8 +321,6 @@ class ScraperClient:
                             f"No redirect detected for Google News URL. Using original domain: {original_domain}")
                 # For non-Google News URLs that were still redirected
                 elif redirect_detected or final_url != article_url:
-                    logger.info(
-                        f"Adding redirect information for non-Google News URL")
                     content['original_url'] = article_url
                     content['final_url'] = final_url
                     content['final_domain'] = final_domain
@@ -396,8 +384,6 @@ class ScraperClient:
         Returns:
             Dictionary with statistics on retry results
         """
-        logger.info(f"Processing failed feeds from {failed_feeds_file}")
-
         # Statistics to return
         stats = {
             "total_feeds_processed": 0,
@@ -462,8 +448,6 @@ class ScraperClient:
 
                     # Use a more generous date range for failed feeds
                     # Pass feed_url for special handling of exempt feeds
-                    logger.info(
-                        f"Filtering articles by date: last {days} days")
                     date_filtered_content = filter_by_date(
                         filtered_content, days, feed_url)
 
@@ -609,7 +593,6 @@ class ScraperClient:
 
             # Filter by date
             # Pass feed_url for special handling of exempt feeds
-            logger.info(f"Filtering articles by date: last {days} days")
             date_filtered_content = filter_by_date(
                 filtered_content, days, feed_url)
 
@@ -620,18 +603,6 @@ class ScraperClient:
                 logger.warning(f"{error_msg} for {feed_url}")
                 result["error"] = error_msg
                 return result
-
-            # Log all found articles for debugging
-            logger.info(
-                f"Found {result['articles_found']} articles in feed {feed_url}:")
-            # Show first 10 only to avoid log spam
-            for idx, item in enumerate(date_filtered_content[:10]):
-                logger.info(
-                    f"  Article {idx+1}: {item.get('title', 'No title')} - {item.get('link', 'No link')}")
-
-            if len(date_filtered_content) > 10:
-                logger.info(
-                    f"  ... and {len(date_filtered_content) - 10} more articles")
 
             # Store articles if db_client provided
             if db_client:

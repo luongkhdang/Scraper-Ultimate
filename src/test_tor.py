@@ -34,8 +34,6 @@ def check_docker_tor_container():
     if not IN_DOCKER:
         return True
 
-    print("\nChecking Tor container in Docker environment...")
-
     # First check that we can ping the tor host
     try:
         # Try to resolve the hostname
@@ -84,7 +82,6 @@ async def test_special_strategy():
     """Test the special strategy with Tor integration"""
     try:
         from scraper.scraper_hooks.strategies.special_strategy import extract_with_special_strategy
-        print("\n5. Testing special strategy with Tor...")
 
         # Test URL - NYTimes (requires special strategy)
         test_url = "https://www.nytimes.com/2023/01/01/business/economy/economy-markets-2023.html"
@@ -116,8 +113,6 @@ async def test_special_strategy():
 
 def main():
     """Main test function"""
-    print(f"\nTor Configuration Test Script")
-    print(f"=============================")
     print(f"Running in Docker: {IN_DOCKER}")
     print(f"Tor Host: {TOR_HOST}")
     print(f"Tor SOCKS Port: {DEFAULT_SOCKS_PORT}")
@@ -132,7 +127,6 @@ def main():
         sys.exit(1)
 
     # Test 1: Check if Tor is enabled
-    print("\n1. Checking if Tor is enabled in configuration...")
     if is_tor_available():
         print("✅ Tor is enabled in configuration")
     else:
@@ -142,7 +136,6 @@ def main():
         sys.exit(1)
 
     # Test 2: Check if Tor is running
-    print("\n2. Checking if Tor is running...")
     if is_tor_running():
         print(f"✅ Tor service is running on {TOR_HOST}:{DEFAULT_SOCKS_PORT}")
     else:
@@ -153,7 +146,6 @@ def main():
         sys.exit(1)
 
     # Test 3: Check connection through Tor
-    print("\n3. Testing connection through Tor...")
     tor_working, current_ip = check_tor_connection()
     if tor_working:
         print(f"✅ Successfully connected through Tor with IP: {current_ip}")
@@ -164,14 +156,12 @@ def main():
         sys.exit(1)
 
     # Test 4: Test IP rotation
-    print("\n4. Testing Tor IP rotation...")
     original_ip = current_ip
     rotation_success = rotate_tor_ip()
 
     if rotation_success:
         print(f"✅ IP rotation command completed successfully")
         # Wait for circuit to establish
-        print("   Waiting 7 seconds for new circuit...")
         time.sleep(7)
 
         # Check new IP

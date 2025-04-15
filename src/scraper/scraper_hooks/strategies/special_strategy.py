@@ -50,10 +50,10 @@ StealthyFetcher = None
 # Check for StealthyFetcher availability with enhanced error handling
 try:
     # Log detailed environment info for easier debugging
-    logging.info(f"Python version: {sys.version}")
-    logging.info(f"Python executable: {sys.executable}")
-    logging.info(
-        f"Running in Docker: {os.environ.get('RUNNING_IN_DOCKER', 'false')}")
+    # logging.info(f"Python version: {sys.version}") # Removed - purely informational
+    # logging.info(f"Python executable: {sys.executable}") # Removed - purely informational
+    # logging.info(
+    #     f"Running in Docker: {os.environ.get('RUNNING_IN_DOCKER', 'false')}") # Removed - purely informational
 
     # Check if scrapling is installed
     scrapling_spec = importlib.util.find_spec("scrapling")
@@ -63,22 +63,22 @@ try:
         for i, path in enumerate(sys.path):
             logging.info(f"  {i}: {path}")
     else:
-        logging.info(f"scrapling package found at: {scrapling_spec.origin}")
+        # logging.info(f"scrapling package found at: {scrapling_spec.origin}") # Removed - purely informational
 
         # Try to import scrapling
         try:
             import scrapling
-            logging.info(
-                f"scrapling version: {getattr(scrapling, '__version__', 'unknown')}")
+            # logging.info(
+            #     f"scrapling version: {getattr(scrapling, '__version__', 'unknown')}") # Removed - purely informational
 
             # Try to import the fetchers module
             try:
                 import scrapling.fetchers
-                logging.info("scrapling.fetchers module imported successfully")
+                # logging.info("scrapling.fetchers module imported successfully") # Removed - purely informational
 
                 # Check what's in the fetchers module
                 dir_fetchers = dir(scrapling.fetchers)
-                logging.info(f"Contents of scrapling.fetchers: {dir_fetchers}")
+                # logging.info(f"Contents of scrapling.fetchers: {dir_fetchers}") # Removed - purely informational
 
                 if 'StealthyFetcher' in dir_fetchers:
                     # Assign the real StealthyFetcher
@@ -95,10 +95,10 @@ try:
                             try:
                                 sig = inspect.signature(
                                     StealthyFetcher.async_fetch)
-                                logging.info(
-                                    f"StealthyFetcher.async_fetch signature: {sig}")
-                                logging.info(
-                                    f"Parameter names: {list(sig.parameters.keys())}")
+                                # logging.info(
+                                #     f"StealthyFetcher.async_fetch signature: {sig}") # Removed - purely informational
+                                # logging.info(
+                                #     f"Parameter names: {list(sig.parameters.keys())}") # Removed - purely informational
                             except Exception as sig_error:
                                 logging.error(
                                     f"Error inspecting StealthyFetcher.async_fetch signature: {sig_error}")
@@ -288,10 +288,8 @@ class SpecialStrategyExtractor(BaseExtractor):
             "timeout": 45000,  # 45 seconds
             "geoip": False,  # Enable if proxy is used
             "os_randomize": True,
-            # Docker-specific optimizations - using a dictionary format instead of a list for additional_arguments
-            "additional_arguments": {
-                "browser_args": ["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
-            },
+            # Docker-specific optimizations - pass browser args directly instead of in a nested structure
+            "additional_arguments": ["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"],
             # Block ads for better performance
             "disable_ads": True,
             # Add additional headers for a more realistic browser
@@ -309,9 +307,9 @@ class SpecialStrategyExtractor(BaseExtractor):
             logger.info(
                 f"{FALLBACK_TAG} Docker environment detected, applying container optimizations")
             # Adjust Firefox preferences for container environment
-            if "--disable-setuid-sandbox" not in self.default_fallback_config["additional_arguments"].get("browser_args", []):
-                self.default_fallback_config["additional_arguments"].setdefault(
-                    "browser_args", []).append("--disable-setuid-sandbox")
+            if "--disable-setuid-sandbox" not in self.default_fallback_config["additional_arguments"]:
+                self.default_fallback_config["additional_arguments"].append(
+                    "--disable-setuid-sandbox")
             # Reduce memory usage
             self.default_fallback_config["block_images"] = True
             self.default_fallback_config["disable_resources"] = True
@@ -350,8 +348,8 @@ class SpecialStrategyExtractor(BaseExtractor):
         }
 
         # Log initialization completion
-        logger.info(
-            f"SpecialStrategyExtractor initialized with Tor available: {self.tor_available}, Page capture: {PAGE_CAPTURE_AVAILABLE}")
+        # logger.info(
+        #    f"SpecialStrategyExtractor initialized with Tor available: {self.tor_available}, Page capture: {PAGE_CAPTURE_AVAILABLE}") # Removed - purely informational
 
     async def _apply_consistent_fingerprint(self, page):
         """
@@ -474,7 +472,7 @@ class SpecialStrategyExtractor(BaseExtractor):
 
     def _update_detection_history(self, detection_type, url):
         """
-        Update detection history to adapt behavior for future requests.
+        Update detection history in memory and save the updated cumulative history to a file.
 
         Args:
             detection_type: Type of detection encountered
@@ -483,7 +481,7 @@ class SpecialStrategyExtractor(BaseExtractor):
         Returns:
             None
         """
-        # Track this detection
+        # Track this detection in memory for the current instance
         now = datetime.now()
         domain = url.split('//')[-1].split('/')[0]
 
@@ -495,21 +493,52 @@ class SpecialStrategyExtractor(BaseExtractor):
         elif detection_type in ['blocked', 'rate_limited']:
             self.detection_history['blocked_pages'] += 1
 
-        # Save detection history for analysis
+        # Load existing history, update it, and save back to file
         try:
+            # Ensure the capture directory exists
+            os.makedirs(self.capture_dir, exist_ok=True)
             history_file = Path(self.capture_dir) / "detection_history.json"
 
-            # Convert data to serializable format
-            serializable_history = {
-                'captcha_encounters': self.detection_history['captcha_encounters'],
-                'blocked_pages': self.detection_history['blocked_pages'],
-                'successful_extractions': self.detection_history['successful_extractions'],
-                'detected_sites': list(self.detection_history['detected_sites']),
-                'last_detection_time': str(now) if now else None
-            }
+            # Load existing history if file exists
+            if history_file.exists():
+                try:
+                    with open(history_file, 'r') as f:
+                        existing_history = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Could not decode existing detection history file: {history_file}. Starting fresh.")
+                    existing_history = {}
+                except Exception as read_error:
+                    logger.error(
+                        f"Error reading existing history file {history_file}: {read_error}")
+                    existing_history = {}  # Proceed with empty history if read fails
+            else:
+                existing_history = {}
 
+            # Initialize keys if they don't exist in the loaded history
+            existing_history.setdefault('captcha_encounters', 0)
+            existing_history.setdefault('blocked_pages', 0)
+            existing_history.setdefault('successful_extractions', 0)
+            existing_history.setdefault('detected_sites', [])
+
+            # Update cumulative counts and site list
+            # Note: We use the in-memory self.detection_history which accumulates per instance
+            # If multiple instances run, this might lead to slight undercounting if they finish close together.
+            # A more robust solution might involve file locking or a central DB.
+            updated_history = {
+                'captcha_encounters': existing_history['captcha_encounters'] + (1 if detection_type == 'captcha' else 0),
+                'blocked_pages': existing_history['blocked_pages'] + (1 if detection_type in ['blocked', 'rate_limited'] else 0),
+                # Need to track successes explicitly
+                'successful_extractions': existing_history['successful_extractions'] + self.detection_history.get('newly_successful', 0),
+                'detected_sites': sorted(list(set(existing_history['detected_sites']) | {domain})),
+                'last_detection_time': str(now)
+            }
+            # Reset newly successful count after adding it
+            self.detection_history['newly_successful'] = 0
+
+            # Write the updated history back to the file
             with open(history_file, 'w') as f:
-                json.dump(serializable_history, f, indent=2)
+                json.dump(updated_history, f, indent=2)
 
         except Exception as e:
             logger.error(f"Failed to save detection history: {e}")
@@ -705,8 +734,11 @@ class SpecialStrategyExtractor(BaseExtractor):
                 # Extract content
                 content = await self._extract_content(page)
 
-                # Record successful extraction
+                # Record successful extraction in memory
                 self.detection_history['successful_extractions'] += 1
+                # Track that a success happened in this instance for saving
+                self.detection_history['newly_successful'] = self.detection_history.get(
+                    'newly_successful', 0) + 1
 
                 # Capture successful page state for analysis if page capture is available
                 if PAGE_CAPTURE_AVAILABLE:
@@ -945,9 +977,9 @@ class SpecialStrategyExtractor(BaseExtractor):
 
         for retry in range(browser_retries + 1):
             try:
-                logger.info(
-                    f"{FALLBACK_TAG} Configuring StealthyFetcher for {url}" +
-                    (f" (retry {retry})" if retry > 0 else ""))
+                # logger.info(
+                #    f"{FALLBACK_TAG} Configuring StealthyFetcher for {url}" +
+                #    (f" (retry {retry})" if retry > 0 else "")) # Removed - purely informational
                 # Combine default fallback config with user-provided options
                 fallback_config = {
                     **self.default_fallback_config, **self.fallback_config}
@@ -955,8 +987,9 @@ class SpecialStrategyExtractor(BaseExtractor):
                 # We're not setting user agent parameter as both 'useragent' and 'user_agent' failed
                 # Let StealthyFetcher use its default user agent
                 if "user_agent" in config:
-                    logger.info(
-                        f"{FALLBACK_TAG} Using default StealthyFetcher user agent (custom user agent ignored)")
+                    # logger.info(
+                    #    f"{FALLBACK_TAG} Using default StealthyFetcher user agent (custom user agent ignored)") # Removed - purely informational
+                    pass  # Keep the behavior, remove the log
 
                 # Add proxy if Tor is configured and available
                 if config.get("use_tor", False) and self.tor_available:
@@ -970,8 +1003,8 @@ class SpecialStrategyExtractor(BaseExtractor):
 
                 # Configure custom scrolling behavior similar to our primary method
                 async def custom_scroll_behavior(page):
-                    logger.info(
-                        f"{FALLBACK_TAG} Executing custom scroll behavior")
+                    # logger.info(
+                    #    f"{FALLBACK_TAG} Executing custom scroll behavior") # Removed - purely informational
                     # Get page height
                     page_height = await page.evaluate("() => document.body.scrollHeight")
 
@@ -1040,8 +1073,8 @@ class SpecialStrategyExtractor(BaseExtractor):
 
                 # Try async_fetch method first
                 try:
-                    logger.info(
-                        f"{FALLBACK_TAG} Trying StealthyFetcher.async_fetch method")
+                    # logger.info(
+                    #    f"{FALLBACK_TAG} Trying StealthyFetcher.async_fetch method") # Removed - purely informational
                     response = await StealthyFetcher.async_fetch(url, **fallback_config)
                 except TypeError as type_error:
                     # If we get a TypeError about unexpected argument, log the error
@@ -1054,41 +1087,7 @@ class SpecialStrategyExtractor(BaseExtractor):
                     param_match = re.search(
                         r"unexpected keyword argument '(\w+)'", error_str)
 
-                    if "list" in error_str and "mapping" in error_str:
-                        # Handle the 'list' object is not a mapping error
-                        logger.warning(
-                            f"{FALLBACK_TAG} Detected list vs mapping error, fixing configuration format")
-
-                        # Check which parameters might be lists that should be dictionaries
-                        for key, value in list(fallback_config.items()):
-                            if isinstance(value, list):
-                                logger.warning(
-                                    f"{FALLBACK_TAG} Converting parameter {key} from list to dictionary")
-                                # Convert list to dictionary with a 'values' key
-                                fallback_config[key] = {"values": value}
-
-                        # Try again with updated configuration
-                        logger.info(
-                            f"{FALLBACK_TAG} Retrying with converted parameters")
-                        try:
-                            response = await StealthyFetcher.async_fetch(url, **fallback_config)
-                        except Exception as e:
-                            logger.error(
-                                f"{FALLBACK_TAG} Still failed after list-to-mapping conversion: {e}")
-                            # Try removing all list parameters
-                            list_params = [
-                                k for k, v in fallback_config.items() if isinstance(v, list)]
-                            for param in list_params:
-                                logger.warning(
-                                    f"{FALLBACK_TAG} Removing list parameter: {param}")
-                                fallback_config.pop(param, None)
-
-                            # Try one more time
-                            logger.info(
-                                f"{FALLBACK_TAG} Retrying after removing all list parameters")
-                            response = await StealthyFetcher.async_fetch(url, **fallback_config)
-
-                    elif param_match:
+                    if param_match:
                         bad_param = param_match.group(1)
                         logger.warning(
                             f"{FALLBACK_TAG} Removing problematic parameter: {bad_param}")
@@ -1124,8 +1123,8 @@ class SpecialStrategyExtractor(BaseExtractor):
                         f"{FALLBACK_TAG} StealthyFetcher returned empty response for {url}")
                     return {"success": False, "error": "Empty response from fallback", "url": url}
 
-                logger.info(
-                    f"{FALLBACK_TAG} StealthyFetcher received response, extracting content")
+                # logger.info(
+                #    f"{FALLBACK_TAG} StealthyFetcher received response, extracting content") # Removed - purely informational
 
                 # Extract content using StealthyFetcher's parsing API
                 # Note: StealthyFetcher uses different parsing methods than Playwright
@@ -1196,7 +1195,14 @@ class SpecialStrategyExtractor(BaseExtractor):
                         f"{FALLBACK_TAG} Error extracting metadata with StealthyFetcher: {e}")
 
                 # Record successful extraction in history
-                self.detection_history['successful_extractions'] += 1
+                # No need to increment self.detection_history here, handled by saving logic
+                # self.detection_history['successful_extractions'] += 1
+                # Track success for saving
+                self.detection_history['newly_successful'] = self.detection_history.get(
+                    'newly_successful', 0) + 1
+                # Trigger save (or let _update_detection_history handle it if called for errors)
+                # For simplicity, we'll let the file update only on errors for now.
+                # To save on success: await self._update_detection_history('success', url)
 
                 logger.info(
                     f"{FALLBACK_TAG} Successfully extracted content with StealthyFetcher🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴: {len(text_content)} chars")
@@ -1245,7 +1251,7 @@ async def extract_with_special_strategy(url: str, user_agent: str = None) -> tup
     Returns:
         tuple: (content, final_url) or (None, None) if extraction fails
     """
-    logger.info(f"Using compatibility wrapper for special strategy on {url}")
+    # logger.info(f"Using compatibility wrapper for special strategy on {url}") # Removed - purely informational
     try:
         # Create config dict with user agent
         config = {"user_agent": user_agent} if user_agent else {}

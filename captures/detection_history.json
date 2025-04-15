@@ -1,0 +1,11 @@
+{
+  "captcha_encounters": 9,
+  "blocked_pages": 4,
+  "successful_extractions": 0,
+  "detected_sites": [
+    "www.bloomberg.com",
+    "www.nytimes.com",
+    "www.politico.com"
+  ],
+  "last_detection_time": "2025-04-15 19:33:43.896829"
+}

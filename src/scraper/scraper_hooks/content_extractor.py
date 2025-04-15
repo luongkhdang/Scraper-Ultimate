@@ -109,7 +109,6 @@ def _make_http_request(url: str, custom_user_agent: str = None, custom_referrer:
 
     # Make the request with proper error handling
     try:
-        logger.debug(f"Making HTTP request to {url}")
         return make_request(url, headers=headers)
     except Exception as e:
         logger.error(f"HTTP request failed for {url}: {e}")
@@ -181,9 +180,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
 
     for attempt, delay in enumerate([0] + retry_delays):
         try:
-            logger.info(
-                f"Trying Playwright for {article_url} - Attempt {attempt+1} with {delay}ms loading delay")
-
             # Browser launch options
             browser_args = []
 
@@ -235,9 +231,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
 
                 # Special handling for BizToc URLs
                 if is_biztoc:
-                    logger.info(
-                        "BizToc URL detected in Playwright, extracting original URL")
-
                     try:
                         # Navigate to the BizToc page first
                         page.goto(article_url, timeout=30000,
@@ -348,8 +341,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                             article_url = original_url
 
                             # Now navigate to the original article
-                            logger.info(
-                                f"Navigating to original article: {article_url} ")
                             page.goto(article_url, timeout=site_config['timeout'],
                                       wait_until=site_config['wait'])
                         else:
@@ -360,13 +351,8 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                             f"Error handling BizToc URL in Playwright: {e}")
                 # Special handling for Google News URLs - improved redirect detection
                 elif is_google_news:
-                    logger.info(
-                        "Google News URL detected in Playwright, handling redirects")
-
                     try:
                         # First, navigate to the Google News URL
-                        logger.info(
-                            f"Navigating to Google News URL: {article_url}")
                         page.goto(article_url, timeout=30000,
                                   wait_until='domcontentloaded')
 
@@ -378,9 +364,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                         initial_url = page.url
                         redirected_url = initial_url
                         redirect_detected = False
-
-                        logger.info(
-                            f"Starting redirect detection polling for Google News. Initial URL: {initial_url}")
 
                         # Poll for URL changes with a maximum wait time
                         while time.time() - start_time < max_wait_time/1000:
@@ -436,9 +419,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                                             selector)
 
                                         if elements and len(elements) > 0:
-                                            logger.info(
-                                                f"Found potential article link with selector '{selector}', attempting to click")
-
                                             # Store the current URL before clicking
                                             pre_click_url = page.url
 
@@ -662,8 +642,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                     # Standard navigation for non-BizToc and non-Google News URLs
                     try:
                         # Use a simpler "commit" wait strategy for initial navigation
-                        logger.info(
-                            f"Navigating to {article_url} with {site_config['wait']} strategy")
                         page.goto(article_url, timeout=site_config['timeout'],
                                   wait_until=site_config['wait'])
                     except Exception as e:
@@ -753,8 +731,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                         return None
 
                 if delay > 0:
-                    logger.info(
-                        f"Waiting additional {delay}ms for content to load")
                     page.wait_for_timeout(delay)
 
                     # Gentle scrolling for problematic sites
@@ -842,9 +818,6 @@ def _extract_with_playwright(article_url: str, user_agent: str) -> Optional[Tupl
                     logger.info(
                         f"Successfully extracted content using Playwright for {article_url} on attempt {attempt+1}")
                     return content, final_url
-
-                logger.info(
-                    f"Attempt {attempt+1} failed to extract sufficient content")
 
         except Exception as e:
             logger.error(

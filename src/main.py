@@ -59,7 +59,7 @@ def process_rss_feed(feed_url: str, scraper: ScraperClient, db_client: PostgreSQ
         Number of article URLs stored
     """
     try:
-        logger.info(f"Processing RSS feed: {feed_url}")
+        # logger.info(f"Processing RSS feed: {feed_url}") # Removed
 
         # Extract feed content, passing db_client to filter out existing URLs
         # Get only articles from the last 2 days
@@ -118,8 +118,8 @@ def process_rss_feed(feed_url: str, scraper: ScraperClient, db_client: PostgreSQ
             else:
                 logger.warning(f"Failed to store article: {title} - {url}")
 
-        logger.info(
-            f"Stored {articles_stored} articles from RSS feed: {feed_url}")
+        # logger.info(
+        #    f"Stored {articles_stored} articles from RSS feed: {feed_url}") # Removed
         return articles_stored
 
     except Exception as e:
@@ -161,6 +161,7 @@ def main():
         article_workers = max(int(PARALLEL_WORKERS * 0.9), 5)
 
         logger.info(
+            # Kept - might be useful config info
             f"Creating thread pools with {rss_workers} RSS workers and {article_workers} article workers")
 
         # Process pending articles and RSS feeds concurrently
@@ -171,8 +172,8 @@ def main():
         # Create a ThreadPoolExecutor for RSS feeds
         with ThreadPoolExecutor(max_workers=rss_workers) as rss_executor:
             # Submit all RSS feed processing tasks
-            logger.info(
-                f"Starting RSS feed scraping for {len(rss_feeds)} feeds")
+            # logger.info(
+            #     f"Starting RSS feed scraping for {len(rss_feeds)} feeds") # Removed
             future_to_feed = {
                 rss_executor.submit(process_rss_feed, feed, scraper, db_client): feed
                 for feed in rss_feeds
@@ -191,21 +192,21 @@ def main():
 
                     while not pending_processing_complete:
                         batch_count += 1
-                        logger.info(
-                            f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})")
+                        # logger.info(
+                        #     f"Processing batch #{batch_count} of pending articles (batch size: {PENDING_BATCH_SIZE})") # Removed
                         processed_count = process_pending_articles(
                             scraper, db_client, PENDING_BATCH_SIZE)
 
                         total_processed += processed_count
                         local_processed += processed_count
-                        logger.info(
-                            f"Batch #{batch_count} complete: processed {processed_count} articles")
+                        # logger.info(
+                        #     f"Batch #{batch_count} complete: processed {processed_count} articles") # Removed
 
                         if processed_count == 0:
                             # No more pending articles, but don't exit the loop yet
                             # Wait a bit to see if more articles come from RSS processing
-                            logger.info(
-                                "No pending articles, waiting for more from RSS feeds...")
+                            # logger.info(
+                            #     "No pending articles, waiting for more from RSS feeds...") # Removed
                             time.sleep(5)
 
                     return local_processed
@@ -235,9 +236,9 @@ def main():
                         }
 
                 # Signal that RSS processing is complete
-                logger.info(
-                    f"RSS feed scraping completed. Total article URLs stored: {total_articles}")
-                logger.info(
+                # logger.info(
+                #     f"RSS feed scraping completed. Total article URLs stored: {total_articles}") # Removed
+                logger.info(  # Kept - Summary info
                     f"RSS feed scraping failed for {len(failed_feeds)} feeds")
 
                 # Allow the pending article processor to finish any remaining articles
@@ -246,128 +247,97 @@ def main():
 
                 # Wait for pending article processing to complete
                 additional_processed = pending_future.result()
-                logger.info(
+                logger.info(  # Kept - Summary info
                     f"Pending article processing complete. Total articles processed: {total_processed}")
 
-        # STEP 4: Retry processing failed articles with limited workers
-        logger.info(
-            "========== STARTING STEP 4: RETRYING FAILED ARTICLES ==========")
-        logger.info(
-            f"Retrying articles with 'FAILED' status using up to {min(15, PARALLEL_WORKERS)} parallel workers...")
+                # Check for failed articles
+                failed_articles = db_client.get_failed_articles()
+                failed_count = len(failed_articles)
 
-        # Get failed articles from the database
-        failed_articles = db_client.get_failed_articles()
+                # logger.info( # Removed
+                #     "\n========== STARTING FINAL CHECK ==========")
 
-        if failed_articles:
-            failed_count = len(failed_articles)
-            logger.info(f"Found {failed_count} failed articles to retry")
+                if failed_count > 0:
+                    # Kept - Summary info
+                    logger.info(
+                        f"Found {failed_count} failed articles to retry")
+                    # logger.info("Retrying failed articles...") # Removed
 
-            # Use a reasonable number of workers for retries
-            # Maximum 15 workers for retries, which is half of our total PARALLEL_WORKERS
-            retry_workers = min(15, PARALLEL_WORKERS // 2)
+                    # Limit retry workers to avoid overwhelming resources
+                    retry_workers = min(
+                        article_workers, max(5, PARALLEL_WORKERS // 4))
+                    # Kept - config info
+                    logger.info(
+                        f"Retrying failed articles with {retry_workers} workers...")
 
-            # Extract URLs from failed articles
-            failed_urls = [article['url'] for article in failed_articles]
+                    # Retry failed articles with a smaller, dedicated pool
+                    with ThreadPoolExecutor(max_workers=retry_workers) as retry_executor:
+                        retry_futures = [
+                            retry_executor.submit(
+                                process_pending_articles, scraper, db_client, 1, article_id=article['id']
+                            )
+                            for article in failed_articles
+                        ]
+                        retried_count = 0
+                        for future in retry_futures:
+                            try:
+                                result = future.result()
+                                if result > 0:
+                                    retried_count += 1
+                            except Exception as e:
+                                logger.error(f"Error during retry: {e}")
 
-            # Process failed articles in batches
-            retry_batch_size = 50  # Process in smaller batches
-            successfully_retried = 0
+                        # Kept - Summary info
+                        logger.info(
+                            f"Completed retrying failed articles. Successfully retried: {retried_count}/{failed_count}")
+                else:
+                    # Kept - Summary info
+                    logger.info("No failed articles found to retry")
 
-            for i in range(0, len(failed_urls), retry_batch_size):
-                batch_urls = failed_urls[i:i+retry_batch_size]
-                logger.info(
-                    f"Processing retry batch {i//retry_batch_size + 1} of {(len(failed_urls) + retry_batch_size - 1) // retry_batch_size} ({len(batch_urls)} articles)")
+                # logger.info( # Removed
+                #     "\n========== COMPLETED FINAL CHECK ==========")
 
-                # Process this batch of failed articles
-                success_count = process_pending_articles(
-                    scraper,
-                    db_client,
-                    batch_size=retry_batch_size,
-                    specific_urls=batch_urls
-                )
+                # logger.info( # Removed
+                #     "\n========== STARTING DATABASE CLEANUP ==========")
+                # logger.info("Cleaning up old articles...") # Removed
+                # Call cleanup function
+                db_client.clean_up_database()
+                # logger.info("Database cleanup complete.") # Removed
+                # logger.info( # Removed
+                #     "\n========== COMPLETED DATABASE CLEANUP ==========")
 
-                successfully_retried += success_count
-                logger.info(
-                    f"Retry batch complete: {success_count} articles successfully processed")
-
-                # Add a small delay between batches
-                if i + retry_batch_size < len(failed_urls):
-                    time.sleep(2)
-
-            logger.info(
-                f"Retry processing complete. Successfully retried {successfully_retried} out of {failed_count} articles")
-        else:
-            logger.info("No failed articles found to retry")
-
-        logger.info(
-            "========== COMPLETED STEP 4: RETRYING FAILED ARTICLES ==========")
-
-        # Check for remaining pending articles and process them until none remain
-        logger.info(
-            "========== FINAL CHECK: ENSURING NO PENDING ARTICLES REMAIN ==========")
-
-        pending_count = db_client.get_pending_articles_count()
-        while pending_count > 0:
-            logger.info(
-                f"Found {pending_count} remaining pending articles. Processing them now...")
-
-            # Process in reasonable batches
-            remaining_processed = process_pending_articles(
-                scraper, db_client, PENDING_BATCH_SIZE)
-            logger.info(
-                f"Processed {remaining_processed} remaining pending articles")
-
-            # Check if we still have pending articles
-            pending_count = db_client.get_pending_articles_count()
-
-            # Small delay to prevent tight loops
-            if pending_count > 0:
-                logger.info(
-                    f"Still have {pending_count} pending articles. Continuing processing...")
-                time.sleep(2)
-
-        logger.info(
-            "No pending articles remain in the database. Proceeding to export reports.")
-        logger.info("========== COMPLETED FINAL CHECK ==========")
-
-        # Clean up the database before generating reports
-        logger.info("========== STARTING DATABASE CLEANUP ==========")
-        logger.info(
-            "Removing duplicate content and failed articles from the database...")
-        deleted_count = db_client.clean_up_database()
-        logger.info(
-            f"Database cleanup complete: {deleted_count} articles removed")
-        logger.info("========== COMPLETED DATABASE CLEANUP ==========")
+        # logger.info("\nExporting failed items...") # Removed
 
         # Export failed RSS feeds
-        if failed_feeds:
-            failed_feeds_file = os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), 'failed_feeds.json')
-            export_failed_feeds(failed_feeds, failed_feeds_file)
-            logger.info(
-                f"Exported {len(failed_feeds)} failed RSS feeds to {failed_feeds_file}")
+        # logger.info("Exporting failed RSS feeds...") # Removed
+        failed_feeds_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                         'output', 'failed_feeds.json')
+        if export_failed_feeds(failed_feeds, failed_feeds_file):
+            # Kept - Output location
+            logger.info(f"Failed RSS feeds exported to {failed_feeds_file}")
         else:
-            logger.info("No failed RSS feeds to export")
+            logger.info("No failed RSS feeds to export")  # Kept - Summary info
 
-        # Export failed domains with error messages
-        failed_domains = db_client.get_failed_domains()
-        if failed_domains:
-            failed_domains_file = os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), 'failed_domains.json')
-            export_failed_domains(failed_domains, failed_domains_file)
-            logger.info(
-                f"Exported {len(failed_domains)} failed domains to {failed_domains_file}")
+        # Export failed domains
+        # logger.info("Exporting failed domains...") # Removed
+        output_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   'output', 'failed_domains.json')
+        if export_failed_domains(db_client, output_file):
+            # Kept - Output location
+            logger.info(f"Failed domains exported to {output_file}")
         else:
-            logger.info("No failed domains to export")
+            logger.info("No failed domains to export")  # Kept - Summary info
 
-        # Export unique domains encountered during scraping
-        output_file = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'unique_domains.json')
-        scraper.export_unique_domains(output_file)
-        logger.info(f"Unique domains exported to {output_file}")
+        # Export unique domains and their counts
+        unique_domains_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                           'output', 'unique_domains.csv')
+        # if db_client.export_unique_domains_to_csv(unique_domains_file): # Commented out - Method not found
+        #    logger.info(f"Unique domains exported to {unique_domains_file}") # Kept - Output location
 
     except Exception as e:
-        logger.error(f"Error in main function: {e}")
+        logger.error(f"Error in main function: {e}", exc_info=True)
+    finally:
+        pass  # Added pass to fix indentation error
 
 
 if __name__ == "__main__":

@@ -29,7 +29,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Check Docker environment
 IN_DOCKER = os.environ.get('RUNNING_IN_DOCKER', 'false').lower(
 ) == 'true' or os.path.exists('/.dockerenv')
-logger.info(f"Docker environment detected: {IN_DOCKER}")
 
 # Get Tor configuration from environment variables
 TOR_HOST = os.environ.get('TOR_HOST', '127.0.0.1' if not IN_DOCKER else 'tor')
@@ -47,10 +46,8 @@ def check_socket_connection(host, port, timeout=5):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
-        logger.info(f"Attempting to connect to {host}:{port}")
         s.connect((host, port))
         s.close()
-        logger.info(f"Successfully connected to {host}:{port}")
         return True
     except Exception as e:
         logger.error(f"Failed to connect to {host}:{port}: {e}")
@@ -66,8 +63,6 @@ def check_tor_proxy():
             'http': proxy_url,
             'https': proxy_url
         }
-
-        logger.info(f"Testing Tor proxy using {proxy_url}")
 
         # Make a request to an IP checking service
         response = requests.get('https://httpbin.org/ip',
@@ -116,22 +111,17 @@ async def rotate_tor_ip():
             logger.error("Cannot rotate IP because Tor proxy is not working")
             return False
 
-        logger.info(f"Current Tor IP: {current_ip}")
-        logger.info("Attempting to rotate Tor IP...")
-
         # Try different methods to rotate IP
         rotation_success = False
 
         # Try using the stem library first
         try:
-            logger.info("Trying to rotate using Stem library...")
             from stem import Signal
             from stem.control import Controller
 
             with Controller.from_port(address=TOR_HOST, port=TOR_CONTROL_PORT) as controller:
                 controller.authenticate(password=TOR_PASSWORD)
                 controller.signal(Signal.NEWNYM)
-                logger.info("Sent NEWNYM signal to Tor controller")
                 rotation_success = True
         except ImportError:
             logger.warning("Stem library not available")
@@ -141,8 +131,6 @@ async def rotate_tor_ip():
         # If stem failed, try direct socket connection
         if not rotation_success:
             try:
-                logger.info(
-                    "Trying to rotate using direct socket connection...")
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(10)
                 s.connect((TOR_HOST, TOR_CONTROL_PORT))
@@ -173,15 +161,12 @@ async def rotate_tor_ip():
                 # Close the connection
                 s.sendall(b'QUIT\r\n')
                 s.close()
-                logger.info(
-                    "Successfully sent NEWNYM signal using socket connection")
                 rotation_success = True
             except Exception as e:
                 logger.error(f"Error using socket to rotate IP: {e}")
 
         # Wait for the circuit to establish
         if rotation_success:
-            logger.info("Waiting for new Tor circuit to establish...")
             await asyncio.sleep(5)
 
             # Check if IP actually changed
@@ -209,8 +194,6 @@ async def rotate_tor_ip():
 async def import_and_test_special_strategy():
     """Test importing and using the special_strategy module"""
     try:
-        logger.info("Testing special_strategy module import...")
-
         # Import the module
         from scraper.scraper_hooks.strategies.special_strategy import SpecialStrategyExtractor
         logger.info("Successfully imported SpecialStrategyExtractor")
@@ -247,53 +230,45 @@ async def import_and_test_special_strategy():
 
 async def run_all_tests():
     """Run all Tor tests"""
-    logger.info("=== STARTING TOR CONNECTION TESTS ===")
+    # Test basic socket connectivity
+    socks_conn_ok = check_socket_connection(TOR_HOST, TOR_SOCKS_PORT)
 
-    # Test 1: Basic socket connection to Tor SOCKS port
-    logger.info("\n=== Test 1: Basic socket connection to Tor SOCKS port ===")
-    socks_connected = check_socket_connection(TOR_HOST, TOR_SOCKS_PORT)
+    # Test control port connection
+    control_conn_ok = check_socket_connection(TOR_HOST, TOR_CONTROL_PORT)
 
-    # Test 2: Basic socket connection to Tor Control port
-    logger.info("\n=== Test 2: Basic socket connection to Tor Control port ===")
-    control_connected = check_socket_connection(TOR_HOST, TOR_CONTROL_PORT)
+    # Test Tor proxy functionality
+    proxy_ok, initial_ip = check_tor_proxy()
 
-    # Test 3: Tor proxy functionality
-    logger.info("\n=== Test 3: Tor proxy functionality ===")
-    proxy_working, tor_ip = check_tor_proxy()
-
-    # Test 4: Tor IP rotation
-    logger.info("\n=== Test 4: Tor IP rotation ===")
-    if proxy_working:
-        rotation_working = await rotate_tor_ip()
+    # Test IP rotation
+    rotation_ok = False
+    if proxy_ok:
+        rotation_ok = await rotate_tor_ip()
     else:
         logger.error("Skipping IP rotation test because proxy isn't working")
-        rotation_working = False
 
-    # Test 5: Special strategy module
-    logger.info("\n=== Test 5: Special strategy module ===")
-    strategy_working = await import_and_test_special_strategy()
+    # Test special strategy module import
+    special_strategy_ok = await import_and_test_special_strategy()
 
     # Print summary
     logger.info("\n=== TEST SUMMARY ===")
     logger.info(
-        f"Socket connection to Tor SOCKS port: {'SUCCESS' if socks_connected else 'FAILED'}")
+        f"1. SOCKS Port Connection ({TOR_HOST}:{TOR_SOCKS_PORT}): {'OK' if socks_conn_ok else 'FAILED'}")
     logger.info(
-        f"Socket connection to Tor Control port: {'SUCCESS' if control_connected else 'FAILED'}")
+        f"2. Control Port Connection ({TOR_HOST}:{TOR_CONTROL_PORT}): {'OK' if control_conn_ok else 'FAILED'}")
     logger.info(
-        f"Tor proxy functionality: {'SUCCESS' if proxy_working else 'FAILED'}")
+        f"3. Tor Proxy Functionality: {'OK' if proxy_ok else 'FAILED'} (Initial IP: {initial_ip})")
     logger.info(
-        f"Tor IP rotation: {'SUCCESS' if rotation_working else 'FAILED'}")
+        f"4. Tor IP Rotation: {'OK' if rotation_ok else ('FAILED' if proxy_ok else 'SKIPPED')}")
     logger.info(
-        f"Special strategy module: {'SUCCESS' if strategy_working else 'FAILED'}")
+        f"5. Special Strategy Module: {'OK' if special_strategy_ok else 'FAILED'}")
 
-    # Overall result
-    if socks_connected and proxy_working and strategy_working:
-        logger.info(
-            "\n✅ OVERALL: Tor is configured correctly for special_strategy")
+    # Overall status
+    overall_ok = socks_conn_ok and control_conn_ok and proxy_ok and rotation_ok and special_strategy_ok
+    if overall_ok:
+        logger.info("\n✅ All Tor tests passed successfully!")
     else:
-        logger.error(
-            "\n❌ OVERALL: Tor is NOT configured correctly. See logs for details.")
+        logger.error("\n❌ Some Tor tests failed. Please check the logs above.")
+
 
 if __name__ == "__main__":
-    # Run all the tests
     asyncio.run(run_all_tests())
