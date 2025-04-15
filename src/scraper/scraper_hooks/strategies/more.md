@@ -568,3 +568,33 @@ if __name__ == "__main__":
 8. **Logging Strategy**: Use distinct logging tags to identify fallback operations
 
 By following this implementation plan, we can successfully integrate StealthyFetcher as a fallback mechanism in our existing scraping system, providing a more robust solution for handling protected websites.
+
+## Docker Environment Configuration for StealthyFetcher
+
+For StealthyFetcher to work correctly in a Docker environment, the Dockerfile needs to be updated to include Firefox installation. Here's a recommended update to the Dockerfile:
+
+```dockerfile
+# Install Firefox for StealthyFetcher
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    firefox-esr \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install scrapling package
+RUN pip install scrapling==0.2.99
+
+# Install Firefox browser for Playwright
+RUN python -m playwright install --with-deps firefox
+
+# Set Docker environment flag
+ENV RUNNING_IN_DOCKER=true
+```
+
+Add this to your Dockerfile before the final CMD line. This ensures:
+
+1. Firefox ESR is installed for the system
+2. The scrapling package is installed with the correct version
+3. Firefox browser binaries are installed for Playwright
+4. The RUNNING_IN_DOCKER environment variable is set to enable container-specific optimizations
+
+The special_strategy.py code has been updated to detect Docker environments and apply appropriate optimizations when running in a container.

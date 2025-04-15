@@ -19,6 +19,7 @@ Related files:
     - tor_integration.py: Tor circuit rotation support
     - page_capture.py: Debug capture functionality (currently disabled)
 """
+from ..base import BaseExtractor
 import os
 import asyncio
 import random
@@ -27,6 +28,10 @@ import json
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse
+import sys
+import importlib
+import importlib.util
+import subprocess
 
 # Check for Playwright availability first
 try:
@@ -38,23 +43,122 @@ except ImportError:
         "Playwright not available. Special strategy will be limited.")
     PlaywrightError = Exception  # Fallback definition
 
-# Check for StealthyFetcher availability
+# Initialize StealthyFetcher and availability flags
+STEALTHY_FETCHER_AVAILABLE = False
+StealthyFetcher = None
+
+# Check for StealthyFetcher availability with enhanced error handling
 try:
-    from scrapling.fetchers import StealthyFetcher
-    STEALTHY_FETCHER_AVAILABLE = True
-    logging.info("StealthyFetcher available for fallback extraction")
+    # Log detailed environment info for easier debugging
+    logging.info(f"Python version: {sys.version}")
+    logging.info(f"Python executable: {sys.executable}")
+    logging.info(
+        f"Running in Docker: {os.environ.get('RUNNING_IN_DOCKER', 'false')}")
+
+    # Check if scrapling is installed
+    scrapling_spec = importlib.util.find_spec("scrapling")
+    if scrapling_spec is None:
+        logging.error("scrapling package not found in sys.path")
+        logging.info("Python paths:")
+        for i, path in enumerate(sys.path):
+            logging.info(f"  {i}: {path}")
+    else:
+        logging.info(f"scrapling package found at: {scrapling_spec.origin}")
+
+        # Try to import scrapling
+        try:
+            import scrapling
+            logging.info(
+                f"scrapling version: {getattr(scrapling, '__version__', 'unknown')}")
+
+            # Try to import the fetchers module
+            try:
+                import scrapling.fetchers
+                logging.info("scrapling.fetchers module imported successfully")
+
+                # Check what's in the fetchers module
+                dir_fetchers = dir(scrapling.fetchers)
+                logging.info(f"Contents of scrapling.fetchers: {dir_fetchers}")
+
+                if 'StealthyFetcher' in dir_fetchers:
+                    # Assign the real StealthyFetcher
+                    from scrapling.fetchers import StealthyFetcher
+
+                    # Check for the async_fetch method
+                    if hasattr(StealthyFetcher, 'async_fetch'):
+                        STEALTHY_FETCHER_AVAILABLE = True
+                        logging.info(
+                            "StealthyFetcher available for fallback extraction")
+                        # Log the parameter names for async_fetch to help with debugging
+                        import inspect
+                        if hasattr(inspect, 'signature') and callable(StealthyFetcher.async_fetch):
+                            try:
+                                sig = inspect.signature(
+                                    StealthyFetcher.async_fetch)
+                                logging.info(
+                                    f"StealthyFetcher.async_fetch signature: {sig}")
+                                logging.info(
+                                    f"Parameter names: {list(sig.parameters.keys())}")
+                            except Exception as sig_error:
+                                logging.error(
+                                    f"Error inspecting StealthyFetcher.async_fetch signature: {sig_error}")
+                    else:
+                        STEALTHY_FETCHER_AVAILABLE = False
+                        logging.error(
+                            "StealthyFetcher exists but doesn't have async_fetch method")
+                        logging.info(
+                            f"Available methods: {[m for m in dir(StealthyFetcher) if not m.startswith('__')]}")
+                else:
+                    logging.error(
+                        "StealthyFetcher class not found in scrapling.fetchers module")
+                    logging.info("Available attributes in scrapling.fetchers: " +
+                                 ", ".join([x for x in dir_fetchers if not x.startswith('__')]))
+                    STEALTHY_FETCHER_AVAILABLE = False
+            except ImportError as fetchers_error:
+                logging.error(
+                    f"Failed to import scrapling.fetchers: {fetchers_error}")
+                STEALTHY_FETCHER_AVAILABLE = False
+        except ImportError as scrapling_error:
+            logging.error(f"Failed to import scrapling: {scrapling_error}")
+            STEALTHY_FETCHER_AVAILABLE = False
 except ImportError:
+    logging.error("Import error during inspection of scrapling package")
     STEALTHY_FETCHER_AVAILABLE = False
     logging.warning(
         "StealthyFetcher not available. Fallback capability will be limited.")
 
-from ..base import BaseExtractor
+# If we're in Docker, try to explicitly install scrapling if not available
+if os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true' and not STEALTHY_FETCHER_AVAILABLE:
+    try:
+        logging.info(
+            "Attempting to install scrapling package in Docker environment")
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', 'scrapling==0.2.99'],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            logging.info(
+                "Successfully installed scrapling, trying import again")
+            try:
+                # Try importing again after installation
+                import scrapling.fetchers
+                from scrapling.fetchers import StealthyFetcher
+                STEALTHY_FETCHER_AVAILABLE = True
+                logging.info(
+                    "StealthyFetcher now available after installation")
+            except ImportError as e:
+                logging.error(
+                    f"Still can't import StealthyFetcher after installation: {e}")
+        else:
+            logging.error(f"Failed to install scrapling: {result.stderr}")
+    except Exception as e:
+        logging.error(f"Error during scrapling installation attempt: {e}")
+
 
 # List of domains that we won't even try to scrape
 NOT_TO_TRY_DOMAINS = [
-    "thehill.com",
-    "wsj.com",
-    "nytimes.com",
+
 ]
 
 # Import tor integration with robust error handling
@@ -183,8 +287,34 @@ class SpecialStrategyExtractor(BaseExtractor):
             "network_idle": True,
             "timeout": 45000,  # 45 seconds
             "geoip": False,  # Enable if proxy is used
-            "os_randomize": True
+            "os_randomize": True,
+            # Docker-specific optimizations - using a dictionary format instead of a list for additional_arguments
+            "additional_arguments": {
+                "browser_args": ["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
+            },
+            # Block ads for better performance
+            "disable_ads": True,
+            # Add additional headers for a more realistic browser
+            "extra_headers": {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "DNT": "1"
+            }
         }
+
+        # Check if we're running in Docker to adjust configuration
+        in_docker = os.environ.get(
+            'RUNNING_IN_DOCKER', 'false').lower() == 'true'
+        if in_docker:
+            logger.info(
+                f"{FALLBACK_TAG} Docker environment detected, applying container optimizations")
+            # Adjust Firefox preferences for container environment
+            if "--disable-setuid-sandbox" not in self.default_fallback_config["additional_arguments"].get("browser_args", []):
+                self.default_fallback_config["additional_arguments"].setdefault(
+                    "browser_args", []).append("--disable-setuid-sandbox")
+            # Reduce memory usage
+            self.default_fallback_config["block_images"] = True
+            self.default_fallback_config["disable_resources"] = True
 
         # Check if StealthyFetcher is available for fallback
         self.stealthy_fetcher_available = STEALTHY_FETCHER_AVAILABLE
@@ -630,8 +760,8 @@ class SpecialStrategyExtractor(BaseExtractor):
                     logger.error(f"Error cleaning up resources: {e}")
 
         # All attempts failed
-        # If all primary attempts failed, try StealthyFetcher fallback if enabled
-        if self.use_fallback and STEALTHY_FETCHER_AVAILABLE:
+        # If all primary attempts failed, try StealthyFetcher fallback if enabled and available
+        if self.use_fallback and self.stealthy_fetcher_available:
             logger.info(
                 f"All primary extraction attempts failed for {url}. Trying StealthyFetcher fallback.")
             fallback_result = await self._extract_with_stealthy_fallback(url, merged_config)
@@ -642,12 +772,15 @@ class SpecialStrategyExtractor(BaseExtractor):
             else:
                 logger.warning(
                     f"StealthyFetcher fallback also failed for {url}")
+        elif self.use_fallback and not self.stealthy_fetcher_available:
+            logger.warning(
+                f"StealthyFetcher fallback requested but not available for {url}")
 
         # If fallback is disabled or also failed, return failure
         return {
             "success": False,
             "error": f"Failed after {self.max_retries + 1} attempts" +
-            (" and fallback" if self.use_fallback and STEALTHY_FETCHER_AVAILABLE else ""),
+            (" and fallback" if self.use_fallback and self.stealthy_fetcher_available else ""),
             "url": url
         }
 
@@ -771,6 +904,25 @@ class SpecialStrategyExtractor(BaseExtractor):
         # Nothing to do here as resources are cleaned within extract()
         pass
 
+    def _is_firefox_error(self, error_str):
+        """
+        Check if the error is related to Firefox browser issues.
+
+        Args:
+            error_str: Error message string
+
+        Returns:
+            bool: True if this is a Firefox/browser error, False otherwise
+        """
+        browser_error_patterns = [
+            "firefox", "browser", "launch", "executable", "timeout",
+            "crashed", "killed", "memory", "allocated", "spawn",
+            "failed to launch", "process", "exited"
+        ]
+
+        error_str = error_str.lower()
+        return any(pattern in error_str for pattern in browser_error_patterns)
+
     async def _extract_with_stealthy_fallback(self, url, config):
         """
         Extract content using StealthyFetcher as a fallback method.
@@ -782,178 +934,304 @@ class SpecialStrategyExtractor(BaseExtractor):
         Returns:
             dict: Extraction result with success status and content
         """
+        # This method requires StealthyFetcher to be available
         if not STEALTHY_FETCHER_AVAILABLE:
-            logger.warning(
-                f"{FALLBACK_TAG} StealthyFetcher not available for fallback extraction")
+            logger.error(
+                f"{FALLBACK_TAG} StealthyFetcher not available but was attempted to be used")
             return {"success": False, "error": "StealthyFetcher not available", "url": url}
 
-        try:
-            logger.info(
-                f"{FALLBACK_TAG} Configuring StealthyFetcher for {url}")
-            # Combine default fallback config with user-provided options
-            fallback_config = {
-                **self.default_fallback_config, **self.fallback_config}
+        # Track retry attempts for browser issues
+        browser_retries = 2  # Maximum browser retry attempts
 
-            # Add user agent if specified - note the parameter name is "useragent" not "user_agent"
-            if "user_agent" in config:
-                fallback_config["useragent"] = config["user_agent"]
+        for retry in range(browser_retries + 1):
+            try:
                 logger.info(
-                    f"{FALLBACK_TAG} Using user agent: {config['user_agent'][:30]}...")
+                    f"{FALLBACK_TAG} Configuring StealthyFetcher for {url}" +
+                    (f" (retry {retry})" if retry > 0 else ""))
+                # Combine default fallback config with user-provided options
+                fallback_config = {
+                    **self.default_fallback_config, **self.fallback_config}
 
-            # Add proxy if Tor is configured and available
-            if config.get("use_tor", False) and self.tor_available:
-                proxy_info = self._get_tor_proxy_info()
-                if proxy_info:
-                    fallback_config["proxy"] = proxy_info
-                    fallback_config["geoip"] = True  # Enable geoIP with proxy
+                # We're not setting user agent parameter as both 'useragent' and 'user_agent' failed
+                # Let StealthyFetcher use its default user agent
+                if "user_agent" in config:
                     logger.info(
-                        f"{FALLBACK_TAG} Configured Tor proxy for StealthyFetcher")
+                        f"{FALLBACK_TAG} Using default StealthyFetcher user agent (custom user agent ignored)")
 
-            # Configure custom scrolling behavior similar to our primary method
-            async def custom_scroll_behavior(page):
-                logger.info(f"{FALLBACK_TAG} Executing custom scroll behavior")
-                # Get page height
-                page_height = await page.evaluate("() => document.body.scrollHeight")
+                # Add proxy if Tor is configured and available
+                if config.get("use_tor", False) and self.tor_available:
+                    proxy_info = self._get_tor_proxy_info()
+                    if proxy_info:
+                        fallback_config["proxy"] = proxy_info
+                        # Enable geoIP with proxy
+                        fallback_config["geoip"] = True
+                        logger.info(
+                            f"{FALLBACK_TAG} Configured Tor proxy for StealthyFetcher")
 
-                # Perform several scroll actions with natural timing
-                scroll_count = random.randint(3, 5)
-                for i in range(scroll_count):
-                    scroll_pos = int(page_height * (i+1) / scroll_count)
-                    await page.mouse.wheel(0, scroll_pos)
-                    await page.wait_for_timeout(random.randint(500, 1500))
+                # Configure custom scrolling behavior similar to our primary method
+                async def custom_scroll_behavior(page):
+                    logger.info(
+                        f"{FALLBACK_TAG} Executing custom scroll behavior")
+                    # Get page height
+                    page_height = await page.evaluate("() => document.body.scrollHeight")
 
-                    # Add random pauses for reading (just like in primary method)
-                    if random.random() < 0.3:
-                        await page.wait_for_timeout(random.randint(800, 2000))
+                    # Perform several scroll actions with natural timing
+                    scroll_count = random.randint(3, 5)
+                    for i in range(scroll_count):
+                        scroll_pos = int(page_height * (i+1) / scroll_count)
+                        await page.mouse.wheel(0, scroll_pos)
+                        await page.wait_for_timeout(random.randint(500, 1500))
 
-                # Scroll back up partially sometimes (same behavior as primary method)
-                if random.random() < 0.7:
-                    partial_scroll_back = random.uniform(0.2, 0.6)
-                    back_position = int(page_height * partial_scroll_back)
-                    await page.evaluate(f"window.scrollTo({{top: {back_position}, behavior: 'smooth'}})")
-                    await page.wait_for_timeout(random.randint(300, 700))
+                        # Add random pauses for reading (just like in primary method)
+                        if random.random() < 0.3:
+                            await page.wait_for_timeout(random.randint(800, 2000))
 
-                return page
+                    # Scroll back up partially sometimes (same behavior as primary method)
+                    if random.random() < 0.7:
+                        partial_scroll_back = random.uniform(0.2, 0.6)
+                        back_position = int(page_height * partial_scroll_back)
+                        await page.evaluate(f"window.scrollTo({{top: {back_position}, behavior: 'smooth'}})")
+                        await page.wait_for_timeout(random.randint(300, 700))
 
-            fallback_config["page_action"] = custom_scroll_behavior
+                    return page
 
-            # Configure selectors to wait for, using same content selectors as primary method
-            content_selectors = [
-                "article", "main", ".content", "#content",
-                ".article", ".post", ".entry-content"
-            ]
-            if random.random() > 0.5:  # Randomize which selector to wait for
-                fallback_config["wait_selector"] = random.choice(
-                    content_selectors)
-                fallback_config["wait_selector_state"] = "visible"
+                fallback_config["page_action"] = custom_scroll_behavior
+
+                # Configure selectors to wait for, using same content selectors as primary method
+                content_selectors = [
+                    "article", "main", ".content", "#content",
+                    ".article", ".post", ".entry-content"
+                ]
+                if random.random() > 0.5:  # Randomize which selector to wait for
+                    fallback_config["wait_selector"] = random.choice(
+                        content_selectors)
+                    fallback_config["wait_selector_state"] = "visible"
+                    logger.info(
+                        f"{FALLBACK_TAG} Waiting for selector: {fallback_config['wait_selector']}")
+
+                # Check for and remove any unsupported parameters based on the documentation
+                # These are the parameters supported according to more2.md (user agent related removed)
+                supported_params = [
+                    "headless", "block_images", "disable_resources", "google_search",
+                    "extra_headers", "block_webrtc", "page_action", "addons",
+                    "humanize", "allow_webgl", "geoip", "os_randomize", "disable_ads",
+                    "network_idle", "timeout", "wait", "wait_selector",
+                    "wait_selector_state", "proxy", "additional_arguments"
+                ]
+
+                # Remove any unsupported parameters
+                unsupported_params = [k for k in list(
+                    fallback_config.keys()) if k not in supported_params]
+                for param in unsupported_params:
+                    logger.warning(
+                        f"{FALLBACK_TAG} Removing unsupported parameter: {param}")
+                    fallback_config.pop(param, None)
+
+                # Perform the extraction with StealthyFetcher
                 logger.info(
-                    f"{FALLBACK_TAG} Waiting for selector: {fallback_config['wait_selector']}")
+                    f"{FALLBACK_TAG} Executing StealthyFetcher fallback for {url}")
 
-            # Perform the extraction with StealthyFetcher
-            logger.info(
-                f"{FALLBACK_TAG} Executing StealthyFetcher fallback for {url}")
-            response = await StealthyFetcher.async_fetch(url, **fallback_config)
+                # Check again if StealthyFetcher is available before calling it
+                # This check is technically redundant now but kept for safety
+                if not STEALTHY_FETCHER_AVAILABLE or StealthyFetcher is None:
+                    logger.error(
+                        f"{FALLBACK_TAG} StealthyFetcher is not available but was attempted to be used")
+                    return {"success": False, "error": "StealthyFetcher not available", "url": url}
 
-            if not response or not hasattr(response, 'html'):
-                logger.warning(
-                    f"{FALLBACK_TAG} StealthyFetcher returned empty response for {url}")
-                return {"success": False, "error": "Empty response from fallback", "url": url}
+                # Try async_fetch method first
+                try:
+                    logger.info(
+                        f"{FALLBACK_TAG} Trying StealthyFetcher.async_fetch method")
+                    response = await StealthyFetcher.async_fetch(url, **fallback_config)
+                except TypeError as type_error:
+                    # If we get a TypeError about unexpected argument, log the error
+                    error_str = str(type_error)
+                    logger.warning(
+                        f"{FALLBACK_TAG} TypeError from async_fetch: {error_str}")
 
-            logger.info(
-                f"{FALLBACK_TAG} StealthyFetcher received response, extracting content")
+                    # Check if the error is about an unexpected keyword argument
+                    import re
+                    param_match = re.search(
+                        r"unexpected keyword argument '(\w+)'", error_str)
 
-            # Extract content using StealthyFetcher's parsing API
-            # Note: StealthyFetcher uses different parsing methods than Playwright
-            try:
-                title = response.css_first("title::text")
-                if title and hasattr(title, 'clean'):
-                    title = title.clean()
-                elif title:
-                    title = str(title)
-                else:
-                    title = ""
-            except Exception as e:
-                logger.error(
-                    f"{FALLBACK_TAG} Error extracting title with StealthyFetcher: {e}")
-                title = ""
+                    if "list" in error_str and "mapping" in error_str:
+                        # Handle the 'list' object is not a mapping error
+                        logger.warning(
+                            f"{FALLBACK_TAG} Detected list vs mapping error, fixing configuration format")
 
-            # Use the same content selectors as the primary method for consistency
-            text_content = ""
-            try:
-                # Extract content using StealthyFetcher's CSS selectors
-                for selector in content_selectors:
-                    elements = response.css(selector)
-                    if elements:
-                        for element in elements:
-                            # Use StealthyFetcher's text extraction methods
-                            if hasattr(element, 'get_all_text'):
-                                content = element.get_all_text(strip=True)
-                            elif hasattr(element, 'text'):
-                                content = element.text()
+                        # Check which parameters might be lists that should be dictionaries
+                        for key, value in list(fallback_config.items()):
+                            if isinstance(value, list):
+                                logger.warning(
+                                    f"{FALLBACK_TAG} Converting parameter {key} from list to dictionary")
+                                # Convert list to dictionary with a 'values' key
+                                fallback_config[key] = {"values": value}
+
+                        # Try again with updated configuration
+                        logger.info(
+                            f"{FALLBACK_TAG} Retrying with converted parameters")
+                        try:
+                            response = await StealthyFetcher.async_fetch(url, **fallback_config)
+                        except Exception as e:
+                            logger.error(
+                                f"{FALLBACK_TAG} Still failed after list-to-mapping conversion: {e}")
+                            # Try removing all list parameters
+                            list_params = [
+                                k for k, v in fallback_config.items() if isinstance(v, list)]
+                            for param in list_params:
+                                logger.warning(
+                                    f"{FALLBACK_TAG} Removing list parameter: {param}")
+                                fallback_config.pop(param, None)
+
+                            # Try one more time
+                            logger.info(
+                                f"{FALLBACK_TAG} Retrying after removing all list parameters")
+                            response = await StealthyFetcher.async_fetch(url, **fallback_config)
+
+                    elif param_match:
+                        bad_param = param_match.group(1)
+                        logger.warning(
+                            f"{FALLBACK_TAG} Removing problematic parameter: {bad_param}")
+                        fallback_config.pop(bad_param, None)
+
+                        # Try again without the problematic parameter
+                        logger.info(
+                            f"{FALLBACK_TAG} Retrying StealthyFetcher.async_fetch without {bad_param}")
+                        try:
+                            response = await StealthyFetcher.async_fetch(url, **fallback_config)
+                        except Exception as e:
+                            # If still failing, try the synchronous fetch method if available
+                            if hasattr(StealthyFetcher, 'fetch') and callable(StealthyFetcher.fetch):
+                                logger.info(
+                                    f"{FALLBACK_TAG} Trying StealthyFetcher.fetch (synchronous) as fallback")
+                                # Convert to async using a thread pool
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    response = await asyncio.get_event_loop().run_in_executor(
+                                        pool, lambda: StealthyFetcher.fetch(
+                                            url, **fallback_config)
+                                    )
                             else:
-                                content = str(element)
+                                # Both methods failed or fetch not available
+                                raise Exception(
+                                    f"Both async_fetch and fetch methods failed: {e}")
+                    else:
+                        # Not a parameter error, re-raise
+                        raise
 
-                            if content and len(content) > 100:  # Skip short content
-                                text_content += content + "\n\n"
+                if not response or not hasattr(response, 'html'):
+                    logger.warning(
+                        f"{FALLBACK_TAG} StealthyFetcher returned empty response for {url}")
+                    return {"success": False, "error": "Empty response from fallback", "url": url}
 
-                        # If we found substantial content, stop looking
-                        if len(text_content) > 500:
-                            break
+                logger.info(
+                    f"{FALLBACK_TAG} StealthyFetcher received response, extracting content")
 
-                # If no content found with specific selectors, get body content
-                if not text_content:
+                # Extract content using StealthyFetcher's parsing API
+                # Note: StealthyFetcher uses different parsing methods than Playwright
+                try:
+                    title = response.css_first("title::text")
+                    if title and hasattr(title, 'clean'):
+                        title = title.clean()
+                    elif title:
+                        title = str(title)
+                    else:
+                        title = ""
+                except Exception as e:
+                    logger.error(
+                        f"{FALLBACK_TAG} Error extracting title with StealthyFetcher: {e}")
+                    title = ""
+
+                # Use the same content selectors as the primary method for consistency
+                text_content = ""
+                try:
+                    # Extract content using StealthyFetcher's CSS selectors
+                    for selector in content_selectors:
+                        elements = response.css(selector)
+                        if elements:
+                            for element in elements:
+                                # Use StealthyFetcher's text extraction methods
+                                if hasattr(element, 'get_all_text'):
+                                    content = element.get_all_text(strip=True)
+                                elif hasattr(element, 'text'):
+                                    content = element.text()
+                                else:
+                                    content = str(element)
+
+                                if content and len(content) > 100:  # Skip short content
+                                    text_content += content + "\n\n"
+
+                            # If we found substantial content, stop looking
+                            if len(text_content) > 500:
+                                break
+
+                    # If no content found with specific selectors, get body content
+                    if not text_content:
+                        logger.info(
+                            f"{FALLBACK_TAG} No content found with selectors, trying body")
+                        body = response.css_first("body")
+                        if body:
+                            if hasattr(body, 'get_all_text'):
+                                text_content = body.get_all_text(strip=True)
+                            elif hasattr(body, 'text'):
+                                text_content = body.text()
+                            else:
+                                text_content = str(body)
+                except Exception as e:
+                    logger.error(
+                        f"{FALLBACK_TAG} Error extracting content with StealthyFetcher: {e}")
+
+                # Get metadata
+                metadata = {}
+                try:
+                    for meta in response.css("meta"):
+                        # StealthyFetcher uses .attrib to access attributes
+                        name = meta.attrib.get(
+                            "name") or meta.attrib.get("property")
+                        content = meta.attrib.get("content")
+                        if name and content:
+                            metadata[name] = content
+                except Exception as e:
+                    logger.error(
+                        f"{FALLBACK_TAG} Error extracting metadata with StealthyFetcher: {e}")
+
+                # Record successful extraction in history
+                self.detection_history['successful_extractions'] += 1
+
+                logger.info(
+                    f"{FALLBACK_TAG} Successfully extracted content with StealthyFetcher🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴: {len(text_content)} chars")
+
+                # Format the result to match the primary extraction method
+                return {
+                    "success": True,
+                    "content": {
+                        "title": title,
+                        "content": text_content.strip(),
+                        "metadata": metadata,
+                        "url": getattr(response, 'url', url),
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "stealthy_fallback"  # Mark the source as fallback
+                    },
+                    "url": getattr(response, 'url', url)
+                }
+
+            except Exception as e:
+                error_str = str(e)
+                logger.error(
+                    f"{FALLBACK_TAG} Error in StealthyFetcher fallback: {error_str}")
+
+                # Check if this is a browser error that might be recovered with retry
+                if retry < browser_retries and self._is_firefox_error(error_str):
                     logger.info(
-                        f"{FALLBACK_TAG} No content found with selectors, trying body")
-                    body = response.css_first("body")
-                    if body:
-                        if hasattr(body, 'get_all_text'):
-                            text_content = body.get_all_text(strip=True)
-                        elif hasattr(body, 'text'):
-                            text_content = body.text()
-                        else:
-                            text_content = str(body)
-            except Exception as e:
-                logger.error(
-                    f"{FALLBACK_TAG} Error extracting content with StealthyFetcher: {e}")
+                        f"{FALLBACK_TAG} Browser error detected, will retry ({retry+1}/{browser_retries})")
+                    # Add a delay before retry
+                    await asyncio.sleep(2)
+                    continue
 
-            # Get metadata
-            metadata = {}
-            try:
-                for meta in response.css("meta"):
-                    # StealthyFetcher uses .attrib to access attributes
-                    name = meta.attrib.get(
-                        "name") or meta.attrib.get("property")
-                    content = meta.attrib.get("content")
-                    if name and content:
-                        metadata[name] = content
-            except Exception as e:
-                logger.error(
-                    f"{FALLBACK_TAG} Error extracting metadata with StealthyFetcher: {e}")
+                return {"success": False, "error": f"Fallback extraction failed: {error_str}", "url": url}
 
-            # Record successful extraction in history
-            self.detection_history['successful_extractions'] += 1
-
-            logger.info(
-                f"{FALLBACK_TAG} Successfully extracted content with StealthyFetcher: {len(text_content)} chars")
-
-            # Format the result to match the primary extraction method
-            return {
-                "success": True,
-                "content": {
-                    "title": title,
-                    "content": text_content.strip(),
-                    "metadata": metadata,
-                    "url": getattr(response, 'url', url),
-                    "timestamp": datetime.now().isoformat(),
-                    "source": "stealthy_fallback"  # Mark the source as fallback
-                },
-                "url": getattr(response, 'url', url)
-            }
-
-        except Exception as e:
-            logger.error(
-                f"{FALLBACK_TAG} Error in StealthyFetcher fallback: {e}")
-            return {"success": False, "error": f"Fallback extraction failed: {str(e)}", "url": url}
+        # We should never reach here, but just in case
+        return {"success": False, "error": "Fallback extraction failed after retries", "url": url}
 
 
 async def extract_with_special_strategy(url: str, user_agent: str = None) -> tuple:

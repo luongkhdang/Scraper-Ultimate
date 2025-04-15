@@ -14,10 +14,10 @@ Related Files:
 - scraper/: Provides the ScraperClient class for scraping
 - postgreSQL/postgreSQL_client.py: Handles database operations
 """
-from main_hooks import process_pending_articles
-from main_utils import read_rss_feeds_from_file, wait_for_database, export_failed_domains, export_failed_feeds
-from postgreSQL.postgreSQL_client import PostgreSQLClient
-from scraper import ScraperClient
+from src.main_hooks import process_pending_articles
+from src.main_utils import read_rss_feeds_from_file, wait_for_database, export_failed_domains, export_failed_feeds
+from src.postgreSQL.postgreSQL_client import PostgreSQLClient
+from src.scraper import ScraperClient
 import os
 import sys
 import logging
@@ -26,9 +26,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
-
-# Add the src directory to the path so we can import the scraper client
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the scraper and database clients
 

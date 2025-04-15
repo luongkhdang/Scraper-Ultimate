@@ -34,10 +34,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install  -r requirements.txt
+RUN pip install -r requirements.txt
+
+# Explicitly install scrapling package to ensure it's available
+RUN pip install scrapling==0.2.99
 
 # Install additional packages for Tor communication
-RUN pip install  stem requests[socks] pysocks
+RUN pip install stem requests[socks] pysocks
 
 # Install NLTK data
 RUN python -m nltk.downloader punkt
@@ -53,5 +56,11 @@ COPY . .
 # Set Docker environment flag
 ENV RUNNING_IN_DOCKER=true
 
-# Command to run the scraper
-CMD ["python", "src/main.py"] 
+# Make the entrypoint script executable
+RUN chmod +x docker-entrypoint.sh
+
+# Set the entrypoint script
+ENTRYPOINT ["./docker-entrypoint.sh"]
+
+# Default command to run the scraper as a module
+CMD ["python", "-m", "src.main"] 

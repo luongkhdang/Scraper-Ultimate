@@ -13,13 +13,6 @@ Related Files:
 - postgreSQL/postgreSQL_client.py: Handles database operations
 - src/scraper/scraper_hooks/: Package containing the scraping components
 """
-from typing import List, Dict, Optional, Any, Set
-import logging
-import urllib.parse
-import time
-import json
-
-# Import the modular scraping components
 from .scraper_hooks import (
     extract_article_content,
     extract_rss_feed_urls,
@@ -30,9 +23,20 @@ from .scraper_hooks import (
     add_domains_from_urls,
     export_domains
 )
+from src.main_utils import RateLimiter
+from typing import List, Dict, Optional, Any, Set
+import logging
+import urllib.parse
+import time
+import json
+import sys
+import os
 
-# Import rate limiter
-from main_utils import RateLimiter
+# Add the 'src' directory to sys.path explicitly
+# This ensures modules within src (like main_utils) can be found
+src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
