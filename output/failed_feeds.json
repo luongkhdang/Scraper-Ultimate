@@ -1,0 +1,26 @@
+{
+  "total_failed_feeds": 5,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=17, tm_hour=17, tm_min=40, tm_sec=35, tm_wday=3, tm_yday=107, tm_isdst=0)",
+  "feeds": {
+    "https://www.latimes.com/rss2.0.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-17 17:30:49.714893"
+    },
+    "https://feeds.washingtonpost.com/rss/rss_the-fix": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-17 17:36:28.250805"
+    },
+    "https://www.usnews.com/rss/the-report": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-17 17:39:20.089958"
+    },
+    "https://feeds.washingtonpost.com/rss/rss_rampage": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-17 17:39:29.983388"
+    },
+    "https://www.economist.com/finance-and-economics/rss.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-17 17:39:50.325933"
+    }
+  }
+}

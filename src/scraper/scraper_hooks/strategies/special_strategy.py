@@ -158,7 +158,44 @@ if os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true' and not STEALT
 
 # List of domains that we won't even try to scrape
 NOT_TO_TRY_DOMAINS = [
-
+    "thehill.com",
+    "www.bloomberg.com",
+    "www.businessinsider.com",
+    "www.economist.com",
+    "www.ft.com",
+    "www.nytimes.com",
+    "www.politico.com",
+    "www.wsj.com"
+    "www.semafor.com",
+    "blockworks.co",
+    "reason.com",
+    "www.huffpost.com",
+    "www.scmp.com",
+    "deadline.com",
+    "www.hollywoodreporter.com",
+    "dnyuz.com",
+    "variety.com",
+    "studyfinds.org",
+    "financialpost.com",
+    "sports.yahoo.com",
+    "www.bizjournals.com",
+    "unherd.com",
+    "www.msnbc.com",
+    "www.theregister.com",
+    "www.japantimes.co.jp",
+    "www.forbes.com",
+    "www.the-sun.com",
+    "www.mediaite.com",
+    "digiday.com",
+    "www.coindesk.com",
+    "autos.yahoo.com",
+    "www.theblock.co",
+    "theweek.com",
+    "www.npr.org",
+    "www.cbsnews.com",
+    "247wallst.com",
+    "www.bbc.com",
+    "www.barchart.com"
 ]
 
 # Import tor integration with robust error handling

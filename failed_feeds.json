@@ -1,6 +1,6 @@
 {
   "total_failed_feeds": 60,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=15, tm_hour=19, tm_min=31, tm_sec=8, tm_wday=1, tm_yday=105, tm_isdst=0)",
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=17, tm_hour=17, tm_min=36, tm_sec=28, tm_wday=3, tm_yday=107, tm_isdst=0)",
   "feeds": {
     "https://biztoc.com/feed": {
       "error": "No articles extracted",
@@ -156,7 +156,7 @@
     },
     "https://feeds.washingtonpost.com/rss/rss_the-fix": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-15 19:31:08.%f"
+      "timestamp": "2025-04-17 17:36:28.%f"
     },
     "https://www.theguardian.com/us/business/rss": {
       "error": "No articles extracted",

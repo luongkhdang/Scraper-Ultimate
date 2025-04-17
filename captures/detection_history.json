@@ -1,11 +1,16 @@
 {
-  "captcha_encounters": 9,
-  "blocked_pages": 4,
+  "captcha_encounters": 789,
+  "blocked_pages": 108,
   "successful_extractions": 0,
   "detected_sites": [
+    "thehill.com",
     "www.bloomberg.com",
+    "www.businessinsider.com",
+    "www.economist.com",
+    "www.ft.com",
     "www.nytimes.com",
-    "www.politico.com"
+    "www.politico.com",
+    "www.wsj.com"
   ],
-  "last_detection_time": "2025-04-15 19:33:43.896829"
+  "last_detection_time": "2025-04-17 17:39:01.448363"
 }

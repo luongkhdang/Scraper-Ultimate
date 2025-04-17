@@ -49,7 +49,6 @@ https://thehill.com/opinion/feed/
 https://www.latimes.com/politics/rss2.0.xml
 https://www.economist.com/china/rss.xml
 https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml
-https://feeds.washingtonpost.com/rss/rss_the-fix
 https://www.theguardian.com/us/business/rss
 https://feeds.content.dowjones.io/public/rss/RSSMarketsMain
 https://thehill.com/news/feed/

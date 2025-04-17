@@ -274,7 +274,7 @@ def main():
                     with ThreadPoolExecutor(max_workers=retry_workers) as retry_executor:
                         retry_futures = [
                             retry_executor.submit(
-                                process_pending_articles, scraper, db_client, 1, article_id=article['id']
+                                process_pending_articles, scraper, db_client, 1, specific_urls=[article['url']]
                             )
                             for article in failed_articles
                         ]
