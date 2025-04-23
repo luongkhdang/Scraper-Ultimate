@@ -1,26 +1,50 @@
 {
-  "total_failed_feeds": 5,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=17, tm_hour=17, tm_min=40, tm_sec=35, tm_wday=3, tm_yday=107, tm_isdst=0)",
+  "total_failed_feeds": 11,
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=21, tm_hour=16, tm_min=26, tm_sec=37, tm_wday=0, tm_yday=111, tm_isdst=0)",
   "feeds": {
+    "https://www.benzinga.com/general/politics/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:45:06.642136"
+    },
+    "https://www.theatlantic.com/feed/channel/politics/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:45:08.413803"
+    },
     "https://www.latimes.com/rss2.0.xml": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-17 17:30:49.714893"
+      "timestamp": "2025-04-21 15:46:34.100712"
     },
-    "https://feeds.washingtonpost.com/rss/rss_the-fix": {
+    "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-17 17:36:28.250805"
+      "timestamp": "2025-04-21 15:51:41.141397"
     },
     "https://www.usnews.com/rss/the-report": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-17 17:39:20.089958"
+      "timestamp": "2025-04-21 15:54:37.541805"
     },
     "https://feeds.washingtonpost.com/rss/rss_rampage": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-17 17:39:29.983388"
+      "timestamp": "2025-04-21 15:55:13.604407"
     },
-    "https://www.economist.com/finance-and-economics/rss.xml": {
+    "https://www.theguardian.com/business/stock-markets/rss": {
       "error": "No articles extracted",
-      "timestamp": "2025-04-17 17:39:50.325933"
+      "timestamp": "2025-04-21 15:55:15.968849"
+    },
+    "https://www.latimes.com/business/rss2.0.xml": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:55:38.555462"
+    },
+    "https://www.benzinga.com/markets/feed": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:55:44.190901"
+    },
+    "https://www.theatlantic.com/feed/channel/technology/": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:56:54.547425"
+    },
+    "https://www.theguardian.com/us/business/rss": {
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 15:57:26.778165"
     }
   }
 }

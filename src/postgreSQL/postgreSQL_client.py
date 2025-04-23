@@ -686,7 +686,9 @@ class PostgreSQLClient:
                     GROUP BY content
                     HAVING COUNT(*) > 1
                 )
+                OR pub_date <= CURRENT_DATE - INTERVAL '10 days'
                 OR proceeding_status = 'FAILED'
+                OR proceeding_status = 'Pending'
                 RETURNING id;
             """)
 

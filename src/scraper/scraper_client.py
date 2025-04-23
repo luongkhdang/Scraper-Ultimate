@@ -4,7 +4,7 @@ Web Scraper Client: Extracts articles and content from news websites with anti-d
 Exported Classes:
 - ScraperClient(): Main scraper class with methods to extract article content from RSS feeds
   - discover_rss_feeds(website_url: str) -> List[str]: Discovers RSS feed URLs from a website
-  - extract_rss_feed_content(feed_url: str, db_client=None, days=2) -> List[Dict[str, str]]: Extracts specific fields from an RSS feed, filtering by date and existing URLs
+  - extract_rss_feed_content(feed_url: str, db_client=None, days=1) -> List[Dict[str, str]]: Extracts specific fields from an RSS feed, filtering by date and existing URLs
   - extract_article_content(article_url: str, referrer: Optional[str] = None) -> Optional[Dict[str, Any]]: Extracts content from an article URL
   - export_unique_domains(output_file: str = "unique_domains.json") -> None: Exports list of unique domains to a JSON file
 
@@ -106,14 +106,14 @@ class ScraperClient:
                 f"Error discovering RSS feeds from {website_url}: {e}")
             raise
 
-    def extract_rss_feed_content(self, feed_url: str, db_client=None, days: int = 2) -> List[Dict[str, str]]:
+    def extract_rss_feed_content(self, feed_url: str, db_client=None, days: int = 1) -> List[Dict[str, str]]:
         """
         Extract specific fields from an RSS feed: language, title, description, link, and pubDate
 
         Args:
             feed_url: URL of the RSS feed to extract content from
             db_client: Optional PostgreSQL client to check if URLs already exist in the database
-            days: Number of days to look back for articles (default: 2, meaning yesterday to today)
+            days: Number of days to look back for articles (default: 1, meaning yesterday to today)
 
         Returns:
             List of dictionaries containing only the specified fields from RSS feed items
@@ -372,7 +372,7 @@ class ScraperClient:
                 self.rate_limiter.report_error(domain)
             self.rate_limiter.release(domain)
 
-    def process_failed_feeds(self, failed_feeds_file: str, db_client=None, days: int = 2) -> Dict[str, Any]:
+    def process_failed_feeds(self, failed_feeds_file: str, db_client=None, days: int = 1) -> Dict[str, Any]:
         """
         Process previously failed RSS feeds with enhanced retry mechanisms
 
@@ -547,7 +547,7 @@ class ScraperClient:
                 f"Error processing failed feeds file {failed_feeds_file}: {e}")
             return stats
 
-    def retry_feed(self, feed_url: str, db_client=None, days: int = 2) -> Dict[str, Any]:
+    def retry_feed(self, feed_url: str, db_client=None, days: int = 1) -> Dict[str, Any]:
         """
         Manually retry a specific RSS feed URL with enhanced retry mechanisms and verbose logging
 

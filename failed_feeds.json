@@ -1,6 +1,6 @@
 {
   "total_failed_feeds": 60,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=17, tm_hour=17, tm_min=36, tm_sec=28, tm_wday=3, tm_yday=107, tm_isdst=0)",
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=21, tm_hour=16, tm_min=53, tm_sec=41, tm_wday=0, tm_yday=111, tm_isdst=0)",
   "feeds": {
     "https://biztoc.com/feed": {
       "error": "No articles extracted",
@@ -15,8 +15,8 @@
       "timestamp": "2025-04-06 20:30:54.090041"
     },
     "http://feeds.benzinga.com/benzinga/trading-ideas": {
-      "error": "No articles extracted",
-      "timestamp": "2025-04-06 20:30:54.530594"
+      "error": "Exceeded maximum timeout of 60s",
+      "timestamp": "2025-04-21 02:44:10.%f"
     },
     "https://www.latimes.com/rss2.0.xml": {
       "error": "No articles extracted",
@@ -68,7 +68,7 @@
     },
     "https://www.the-independent.com/news/business/rss": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-15 06:07:40.%f"
+      "timestamp": "2025-04-21 02:45:55.%f"
     },
     "https://feeds-api.dotdashmeredith.com/v1/rss/standard/8242c021-c2de-4de3-a8b8-f2ffdd3f4ce0": {
       "error": "No articles extracted",
@@ -115,8 +115,8 @@
       "timestamp": "2025-04-06 20:31:19.828599"
     },
     "https://www.usnews.com/rss/news": {
-      "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-15 19:28:26.%f"
+      "error": "No articles extracted",
+      "timestamp": "2025-04-21 16:52:19.%f"
     },
     "https://www.theatlantic.com/feed/channel/international/": {
       "error": "No articles extracted",
@@ -128,7 +128,7 @@
     },
     "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-15 19:29:53.%f"
+      "timestamp": "2025-04-21 16:53:41.%f"
     },
     "https://www.theguardian.com/us-news/us-politics/rss": {
       "error": "No articles extracted",
@@ -239,8 +239,8 @@
       "timestamp": "2025-04-06 20:44:37.432091"
     },
     "https://rsshub.app/straitstimes/singapore": {
-      "error": "No articles extracted",
-      "timestamp": "2025-04-06 20:44:37.889440"
+      "error": "Exceeded maximum timeout of 60s",
+      "timestamp": "2025-04-21 01:59:54.%f"
     }
   }
 }

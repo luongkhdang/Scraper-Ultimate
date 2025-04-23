@@ -195,7 +195,11 @@ NOT_TO_TRY_DOMAINS = [
     "www.cbsnews.com",
     "247wallst.com",
     "www.bbc.com",
-    "www.barchart.com"
+    "www.barchart.com",
+    "www.the-independent.com",
+    "www.usnews.com",
+    "www.sfgate.com",
+    "www.drudgereport.com"
 ]
 
 # Import tor integration with robust error handling

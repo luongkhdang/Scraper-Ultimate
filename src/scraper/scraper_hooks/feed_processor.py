@@ -3,7 +3,7 @@ Feed Processor: Processes RSS feed content, extracting specified fields.
 
 Exported Functions:
 - filter_feed_content(feed_items: List[Dict[str, Any]]) -> List[Dict[str, str]]: Filters feed content to include only specific fields
-- filter_by_date(feed_items: List[Dict[str, str]], days: int = 2, feed_url: str = None) -> List[Dict[str, str]]: Filters feed items by publication date
+- filter_by_date(feed_items: List[Dict[str, str]], days: int = 1, feed_url: str = None) -> List[Dict[str, str]]: Filters feed items by publication date
 
 Related Files:
 - scraper_client.py: Main client file that uses these functions
@@ -50,7 +50,7 @@ def parse_date(date_str: str) -> datetime.datetime:
     return None
 
 
-def filter_by_date(feed_items: List[Dict[str, str]], days: int = 2, feed_url: str = None) -> List[Dict[str, str]]:
+def filter_by_date(feed_items: List[Dict[str, str]], days: int = 1, feed_url: str = None) -> List[Dict[str, str]]:
     """
     Filter feed items to only include those published within specified days
 
