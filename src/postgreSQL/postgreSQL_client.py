@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # Database configuration from environment variables
 DB_CONFIG = {
-    'dbname': os.environ.get('DB_NAME', 'news-db'),
+    'dbname': os.environ.get('DB_NAME', 'newsdb'),
     'user': os.environ.get('DB_USER', 'postgres'),
     'password': os.environ.get('DB_PASSWORD', 'postgres'),
     'host': os.environ.get('DB_HOST', 'localhost'),

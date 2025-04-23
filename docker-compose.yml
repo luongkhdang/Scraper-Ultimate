@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: news-db
+      POSTGRES_DB: newsdb
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "5432:5432"
@@ -13,7 +13,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d 'news-db' || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d 'newsdb' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -100,7 +100,7 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: news-db
+      DB_NAME: newsdb
       DB_USER: postgres
       DB_PASSWORD: postgres
       # Tor configuration
@@ -129,7 +129,7 @@ services:
       DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
-      DB_NAME: news-db
+      DB_NAME: newsdb
       API_HOST: 0.0.0.0
       API_PORT: 8000
     ports:
