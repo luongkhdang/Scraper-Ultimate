@@ -62,9 +62,9 @@ def process_rss_feed(feed_url: str, scraper: ScraperClient, db_client: PostgreSQ
         # logger.info(f"Processing RSS feed: {feed_url}") # Removed
 
         # Extract feed content, passing db_client to filter out existing URLs
-        # Get only articles from the last 2 days
+        # Get only articles from the last 1 days
         feed_items = scraper.extract_rss_feed_content(
-            feed_url, db_client, days=2)
+            feed_url, db_client, days=1)
 
         if not feed_items:
             logger.warning(

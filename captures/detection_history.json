@@ -1,10 +1,10 @@
 {
-  "captcha_encounters": 1534,
-  "blocked_pages": 179,
+  "captcha_encounters": 1847,
+  "blocked_pages": 232,
   "successful_extractions": 0,
   "detected_sites": [
     "markets.businessinsider.com",
     "www.wsj.com"
   ],
-  "last_detection_time": "2025-04-23 19:07:35.526653"
+  "last_detection_time": "2025-04-25 22:07:30.354146"
 }

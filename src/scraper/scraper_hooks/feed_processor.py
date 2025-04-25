@@ -56,7 +56,7 @@ def filter_by_date(feed_items: List[Dict[str, str]], days: int = 1, feed_url: st
 
     Args:
         feed_items: List of dictionaries containing feed item data
-        days: Number of days to look back (default: 2 day)
+        days: Number of days to look back (default: 1 day)
         feed_url: Original feed URL for special handling of certain feeds
 
     Returns:
