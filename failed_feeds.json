@@ -1,6 +1,6 @@
 {
   "total_failed_feeds": 60,
-  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=4, tm_mday=24, tm_hour=21, tm_min=50, tm_sec=9, tm_wday=3, tm_yday=114, tm_isdst=0)",
+  "export_timestamp": "time.struct_time(tm_year=2025, tm_mon=5, tm_mday=1, tm_hour=2, tm_min=23, tm_sec=47, tm_wday=3, tm_yday=121, tm_isdst=0)",
   "feeds": {
     "https://biztoc.com/feed": {
       "error": "No articles extracted",
@@ -128,7 +128,7 @@
     },
     "https://feeds.washingtonpost.com/rss/rss_fact-checker": {
       "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-24 21:50:09.%f"
+      "timestamp": "2025-04-29 18:50:23.%f"
     },
     "https://www.theguardian.com/us-news/us-politics/rss": {
       "error": "No articles extracted",
@@ -163,8 +163,8 @@
       "timestamp": "2025-04-06 20:44:36.096391"
     },
     "https://www.usnews.com/rss/the-report": {
-      "error": "Exceeded maximum timeout of 60s",
-      "timestamp": "2025-04-15 17:05:32.%f"
+      "error": "No articles extracted",
+      "timestamp": "2025-05-01 02:23:47.%f"
     },
     "https://rss.nytimes.com/services/xml/rss/nyt/AsiaPacific.xml": {
       "error": "No articles extracted",
